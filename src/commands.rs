@@ -17,4 +17,6 @@ pub(crate) enum Commands {
     Watch,
     /// Publish notes to Mastodon instance
     Publish,
+    /// Build all notes from scratch
+    Build,
 }
