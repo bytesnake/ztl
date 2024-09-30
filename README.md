@@ -1,4 +1,4 @@
-# ZTL
+# ZTL - Lorenz Taking Notes
 
 A fast static note taking generator with integration into Vim and Mastodon.
 

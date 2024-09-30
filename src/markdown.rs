@@ -1,85 +1,12 @@
 use comrak::nodes::{AstNode, NodeValue, NodeHeading};
 use comrak::{format_html, parse_document, Arena, Options};
-use sha2::Digest;
-use serde::{Serialize, Deserialize};
-use std::path::PathBuf;
-
 use std::collections::HashMap;
+use std::path::PathBuf;
+use anyhow::Result;
 
-pub(crate) type Key = String;
+use crate::notes::{Outgoing, LineColumn, Span, Note};
 
-#[derive(Debug, Serialize, Deserialize)]
-pub(crate) struct Outgoing {
-    target: Key,
-    comment: String,
-    label: String,
-    view: HashMap<String, String>,
-    span: Span,
-}
-
-#[derive(Debug, Serialize, Deserialize, Default, Clone)]
-pub(crate) struct LineColumn {
-    line: usize,
-    #[serde(default)]
-    column: Option<usize>,
-}
-
-#[derive(Debug, Serialize, Deserialize, Default)]
-pub(crate) struct Span {
-    #[serde(default)]
-    source: Option<String>,
-    start: LineColumn,
-    end: LineColumn
-}
-
-pub(crate) type Spans = HashMap<String, HashMap<String, String>>;
-
-#[derive(Debug, Serialize, Deserialize)]
-pub(crate) struct Note {
-    pub(crate) id: Key,
-    header: String,
-    parent: Option<Key>,
-    pub(crate) outgoing: Vec<Outgoing>,
-    incoming: Vec<Key>,
-    html: String,
-    span: Span,
-}
-
-impl Note {
-    pub fn all() -> Vec<Note> {
-        let cache_path = crate::config::get_config_path()
-            .parent().unwrap().join("cache");
-
-        glob::glob(&format!("{}/*", cache_path.to_str().unwrap()))
-            .unwrap().filter_map(|x| x.ok())
-            .map(|x| toml::from_str(&std::fs::read_to_string(&x).unwrap()).unwrap())
-            .collect()
-    }
-
-    pub(crate) fn hash(&self) -> String {
-        let mut sha256 = sha2::Sha256::new();
-        sha256.update(&self.html);
-        format!("{:X}", sha256.finalize())
-    }
-
-    pub(crate) fn outgoing_spans(&self) -> HashMap<String, String> {
-        let mut map = self.outgoing.iter().enumerate().map(|(idx, s)| {
-            let key = format!("{}:{},{}:{}", s.span.start.line,s.span.start.column.unwrap_or(1),s.span.end.line,s.span.end.column.unwrap_or(1));
-
-            (key, idx.to_string())
-        }).collect::<HashMap<String,String>>();
-
-        map.insert("target".to_string(), self.id.clone());
-
-        map
-    }
-
-    pub(crate) fn start_line(&self) -> String {
-        self.span.start.line.to_string()
-    }
-}
-
-pub(crate) fn analyze<'a>(arena: &'a Arena<AstNode<'a>>, content: &str, source: &PathBuf) -> Vec<Note> {
+pub(crate) fn analyze<'a>(arena: &'a Arena<AstNode<'a>>, content: &str, source: &PathBuf) -> Result<Vec<Note>> {
     let root = parse_document(&arena, content, &Options::default());
 
     // first separate document into notes
@@ -110,6 +37,8 @@ pub(crate) fn analyze<'a>(arena: &'a Arena<AstNode<'a>>, content: &str, source: 
                 panic!("Numbering not consistent!");
             } else if level == levels.len() + 1 {
                 levels.push(key.clone());
+            } else if level == levels.len() {
+                levels[level-1] = key.clone();
             } else {
                 levels.truncate(level);
             };
@@ -145,7 +74,7 @@ pub(crate) fn analyze<'a>(arena: &'a Arena<AstNode<'a>>, content: &str, source: 
     });
 
     // parse notes to HTML and outgoing
-    let mut notes = nodes.into_iter().map(|(key, header, parent, node, span)| {
+    let notes = nodes.into_iter().map(|(key, header, parent, node, span)| {
         let mut outgoing: Vec<Outgoing> = vec![];
 
         for node in node.descendants() {
@@ -196,24 +125,10 @@ pub(crate) fn analyze<'a>(arena: &'a Arena<AstNode<'a>>, content: &str, source: 
             outgoing,
             incoming: Vec::new(),
             html: String::from_utf8(html).unwrap(),
-            span
+            span,
+            file: None,
         }
     }).collect::<Vec<_>>();
 
-    let mut incoming: HashMap<Key, Vec<Key>> = HashMap::new();
-
-    for note in &notes {
-        for link in &note.outgoing {
-            let elms = incoming.entry(link.target.clone()).or_insert(vec![]);
-            elms.push(note.id.clone());
-        }
-    }
-
-    for note in &mut notes {
-        if incoming.contains_key(&note.id) {
-            note.incoming = incoming.get(&note.id).unwrap().clone();
-        }
-    }
-
-    notes
+    Ok(notes)
 }
