@@ -1,9 +1,16 @@
 use serde::Deserialize;
 use std::path::PathBuf;
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone)]
+pub(crate) struct Latex {
+    pub preamble: String,
+    pub build: String,
+}
+
+#[derive(Deserialize, Debug, Clone)]
 pub(crate) struct Config {
-    bibtex: String,
+    pub latex: Latex,
+    pub render: String,
 }
 
 pub(crate) fn get_config_path() -> PathBuf {

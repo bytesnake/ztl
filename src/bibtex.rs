@@ -33,6 +33,7 @@ pub(crate) fn analyze(content: &str, source: &PathBuf) -> Result<Vec<Note>> {
             html: String::new(),
             span,
             file: Some(bib.file().clone().unwrap_or("".to_string())),
+            hash: crate::utils::hash(&bib.key),
         })
     }).collect()
 }

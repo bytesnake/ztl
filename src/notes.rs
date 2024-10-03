@@ -1,11 +1,12 @@
 use std::collections::HashMap;
 use std::fs;
 
-use sha2::Digest;
 use serde::{Serialize, Deserialize};
 use itertools::Itertools;
 use glob::glob;
 use anyhow::{Result, Context};
+
+use crate::config::Config;
 
 pub(crate) type Key = String;
 
@@ -43,6 +44,7 @@ pub(crate) struct Note {
     pub html: String,
     pub span: Span,
     pub file: Option<String>,
+    pub hash: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -62,9 +64,7 @@ pub(crate) struct Spans {
 
 impl Note {
     pub(crate) fn hash(&self) -> String {
-        let mut sha256 = sha2::Sha256::new();
-        sha256.update(&self.html);
-        format!("{:X}", sha256.finalize())
+        self.hash.clone()
     }
 
     pub(crate) fn outgoing_spans(&self, notes: &Notes) -> Result<Spans> {
@@ -91,6 +91,16 @@ impl Note {
     pub(crate) fn start_line(&self) -> String {
         self.span.start.line.to_string()
     }
+
+    pub(crate) fn has_changed(&self) -> bool {
+        let content = fs::read_to_string(
+            crate::config::get_config_path().parent().unwrap()
+            .join("cache").join(&self.id)).unwrap();
+
+        let old: Note = toml::from_str(&content).unwrap();
+
+        old.hash != self.hash
+    }
 }
 
 #[derive(Debug)]
@@ -113,7 +123,7 @@ impl Notes {
         Self { notes }
     }
 
-    pub fn from_files(pat: &str) -> Result<Self> {
+    pub fn from_files(pat: &str, config: &Config) -> Result<Self> {
         let arena = comrak::Arena::new();
         let notes: Result<HashMap<Key, Note>> = glob(pat).unwrap()
             .filter_map(|x| x.ok())
@@ -123,6 +133,7 @@ impl Notes {
                 match x.extension().and_then(|x| x.to_str()) {
                     Some("md") => crate::markdown::analyze(&arena, &content, &x),
                     Some("bib") => crate::bibtex::analyze(&content, &x),
+                    Some("tex") => crate::latex::analyze(config, &content, &x),
                     _ => panic!(""),
                 }
             })

@@ -1,4 +1,23 @@
 use std::path::*;
+use std::process::Command;
+use std::io::Write;
+use sha2::Digest;
+
+use crate::config::Config;
+
+pub(crate) fn render_html(config: &Config, content: &str) {
+    let mut f = std::fs::File::create(".ztl/cache/out.html").unwrap();
+    f.write(content.as_bytes()).unwrap();
+    f.flush().unwrap();
+
+    let out = Command::new("bash").current_dir(".ztl/cache/").arg("-C").arg(&config.render).arg("out.html").spawn().unwrap().wait().unwrap(); 
+}
+
+pub(crate) fn hash(content: &str) -> String {
+    let mut sha256 = sha2::Sha256::new();
+    sha256.update(content);
+    format!("{:X}", sha256.finalize())
+}
 
 pub fn diff_paths<P, B>(path: P, base: B) -> Option<PathBuf>
 where

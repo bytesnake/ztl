@@ -12,7 +12,10 @@ mod config;
 mod notes;
 mod markdown;
 mod bibtex;
+mod latex;
 mod utils;
+
+use config::Config;
 
 fn main() -> Result<()> {
     let cli = commands::Cli::parse();
@@ -26,22 +29,21 @@ fn main() -> Result<()> {
         .context("Failed to parse configuration")?;
 
     match cli.command {
-        Some(commands::Commands::Build) => build(),
-        Some(commands::Commands::Publish) => publish(&config),
-        Some(commands::Commands::Watch) => watch(&config),
+        Some(commands::Commands::Build) => build(config),
+        Some(commands::Commands::Publish) => publish(config),
+        Some(commands::Commands::Watch) => watch(config),
         None => analyze(),
     }
 }
 
-fn build() -> Result<()> {
+fn build(config: Config) -> Result<()> {
     println!("Rebuilding notes from scratch ..");
 
-    let mut notes = notes::Notes::from_files("**/*.md")?
-        .extend(notes::Notes::from_files("**/*.bib")?);
+    let mut notes = notes::Notes::from_files("**/*.md", &config)?
+        .extend(notes::Notes::from_files("**/*.bib", &config)?)
+        .extend(notes::Notes::from_files("**/*.tex", &config)?);
 
     notes.update_incoming_links();
-
-    //let texs = glob("**/*.tex").unwrap().collect::<Vec<_>>();
 
     write_notes(&notes)
 }
@@ -86,17 +88,20 @@ fn analyze() -> Result<()> {
     Ok(())
 }
 
-fn watch(_config: &config::Config) -> Result<()> {
+fn watch(config: config::Config) -> Result<()> {
     use crossbeam_channel::unbounded;
     let (s, r) = unbounded();
 
+    let c2 = config.clone();
     let mut watcher = notify::recommended_watcher(move |res| {
         match res {
             Ok(event) => {
                 let event: notify::event::Event = event;
 
                 let path = utils::diff_paths(event.paths.first().unwrap(), std::env::current_dir().unwrap()).unwrap();
-                if path.extension().and_then(std::ffi::OsStr::to_str) != Some("md") {
+                let ext = path.extension().and_then(std::ffi::OsStr::to_str);
+
+                if ext != Some("md") && ext != Some("bib") && ext != Some("tex") {
                     return;
                 }
                 match event.kind {
@@ -104,7 +109,7 @@ fn watch(_config: &config::Config) -> Result<()> {
                        let path = path.to_str().unwrap().to_string();
 
                        println!("Update file {} ..", path);
-                       notes::Notes::from_files(&path).unwrap()
+                       notes::Notes::from_files(&path, &config).unwrap()
                            .notes.into_values()
                            .for_each(|x| s.send(x).unwrap());
                    },
@@ -120,10 +125,15 @@ fn watch(_config: &config::Config) -> Result<()> {
 
     println!("Watching for file changes ..");
 
-    let mut notes = notes::Notes::from_files("**/*.md")?
-        .extend(notes::Notes::from_files("**/*.bib")?);
+    let mut notes = notes::Notes::from_files("**/*.md", &c2)?
+        .extend(notes::Notes::from_files("**/*.bib", &c2)?)
+        .extend(notes::Notes::from_files("**/*.tex", &c2)?);
 
     while let Ok(x) = r.recv() {
+        if x.has_changed() {
+            utils::render_html(&c2, &x.html);
+        }
+
         notes.notes.insert(x.id.clone(), x);
         notes.update_incoming_links();
 
@@ -133,7 +143,7 @@ fn watch(_config: &config::Config) -> Result<()> {
     Ok(())
 }
 
-fn publish(_config: &config::Config) -> Result<()> {
+fn publish(config: config::Config) -> Result<()> {
     let published_path = config::get_config_path()
         .parent().unwrap().join("published");
 

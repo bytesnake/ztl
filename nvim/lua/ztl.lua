@@ -12,21 +12,24 @@ local default_config = {
 
 local watcher = nil
 local current_note = {}
+local current_fdl = ""
+
 function switchFile()
 	if watcher ~= nil then
 		fwatch.unwatch(watcher)
 	end
 
 	-- search for .ztl config folder upwards up to current file
-	local folder = vim.fn.finddir(".ztl", vim.fn.expand('%:p') .. ";/")
-	if folder == "" then
+	current_fdl = vim.fn.finddir(".ztl", vim.fn.expand('%:p') .. ";/")
+	current_fdl = vim.fn.fnamemodify(current_fdl, ':p')
+	if current_fdl == "" then
 		current_span = {}
 		return
 	end
 
 	local fname = vim.fn.expand('%')
 	local fdir = string.upper(vim.fn.sha256(fname))
-	local fdir = folder .. "/cache/" .. fdir
+	local fdir = current_fdl .. "/cache/" .. fdir
 	function update()
 		local succeeded, notes = pcall(toml.decode, tomlStr)
 
@@ -74,7 +77,7 @@ function M.setup(config)
   local ztl_group = ag("ztl", { clear = true })
   au({"WinEnter"}, {
 	  group = ztl_group,
-	  pattern = { "*.md", "*.bib", },
+	  pattern = { "*.md", "*.bib", "*.tex"},
 	  callback = function()
 		switchFile()
 	  end
@@ -125,16 +128,44 @@ function M.setup(config)
 			local cmd = config["pdf_viewer"](file, view["page"], view["search"])
 			vim.notify(cmd)
 			vim.fn.jobstart(cmd, {
-				stdout_buffered = true,
-				stderr_buffered = true,
-				on_stdout = function()
-				end,
-				on_stderr = function()
-				end,
 				on_error = function(err)
 					vim.notify("Could not start pdf viewer", "error")
 				end
 			})
+		elseif note["file"]:sub(-3) == ".md" then
+			local file = vim.fs.normalize(note["file"])
+			if file[0] ~= "/" then
+				file = vim.fs.normalize(vim.fn.fnamemodify(current_fdl, ":h:h") .. "/" .. file)
+			end
+
+			local tabs = vim.api.nvim_list_tabpages()
+			local tabpage = -1
+			for i, tab in ipairs(tabs) do
+				local wins = vim.api.nvim_tabpage_list_wins(tab)
+
+				for j, win in ipairs(wins) do
+					local buf = vim.api.nvim_buf_get_name(vim.api.nvim_win_get_buf(win))
+
+					if file == buf then
+						tabpage = vim.api.nvim_tabpage_get_number(tab)
+					end
+				end
+			end
+
+			if tabpage == -1 then
+				local pat = vim.fn.fnamemodify(file, ":r") .. "*.md"
+				for i, file in ipairs(vim.fn.glob(pat, false, true)) do
+					if i == 1 then
+						vim.cmd("tabnew " .. file)
+					else
+						vim.cmd("bel vsp " .. file)
+						vim.opt.tw = 60
+					end
+					vim.opt.scrollbind = true
+				end
+			else
+				vim.api.nvim_set_current_tabpage(tabpage)
+			end
 		else
 			vim.notify("Target " .. note["file"] .. " not supported", "error")
 		end

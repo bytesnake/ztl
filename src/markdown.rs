@@ -38,8 +38,8 @@ pub(crate) fn analyze<'a>(arena: &'a Arena<AstNode<'a>>, content: &str, source: 
             } else if level == levels.len() + 1 {
                 levels.push(key.clone());
             } else if level == levels.len() {
-                levels[level-1] = key.clone();
-            } else {
+            levels[level-1] = key.clone();
+        } else {
                 levels.truncate(level);
             };
 
@@ -64,9 +64,11 @@ pub(crate) fn analyze<'a>(arena: &'a Arena<AstNode<'a>>, content: &str, source: 
         };
 
         nodes.last_mut().map(|x| x.4.end = pos);
+        let root = arena.alloc(NodeValue::Document.into());
+        root.append(child);
 
         nodes.push(
-            (key.clone(), header, parent, child, span));
+            (key.clone(), header, parent, root, span));
     }
     nodes.last_mut().map(|x| x.4.end = LineColumn {
         line: content.split("\n").count() - 1,
@@ -117,6 +119,7 @@ pub(crate) fn analyze<'a>(arena: &'a Arena<AstNode<'a>>, content: &str, source: 
 
         let mut html = vec![];
         format_html(&node, &Options::default(), &mut html).unwrap();
+        let html = String::from_utf8(html).unwrap();
 
         Note {
             id: key,
@@ -124,7 +127,8 @@ pub(crate) fn analyze<'a>(arena: &'a Arena<AstNode<'a>>, content: &str, source: 
             parent,
             outgoing,
             incoming: Vec::new(),
-            html: String::from_utf8(html).unwrap(),
+            hash: crate::utils::hash(&html),
+            html,
             span,
             file: None,
         }
