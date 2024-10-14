@@ -127,6 +127,7 @@ impl Notes {
         let arena = comrak::Arena::new();
         let notes: Result<HashMap<Key, Note>> = glob(pat).unwrap()
             .filter_map(|x| x.ok())
+            .filter(|x| !x.display().to_string().contains(".ztl"))
             .map(|x| {
                 let content = fs::read_to_string(&x)?;
 

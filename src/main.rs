@@ -99,8 +99,12 @@ fn watch(config: config::Config) -> Result<()> {
                 let event: notify::event::Event = event;
 
                 let path = utils::diff_paths(event.paths.first().unwrap(), std::env::current_dir().unwrap()).unwrap();
-                let ext = path.extension().and_then(std::ffi::OsStr::to_str);
 
+                if path.display().to_string().contains(".ztl") {
+                    return;
+                }
+
+                let ext = path.extension().and_then(std::ffi::OsStr::to_str);
                 if ext != Some("md") && ext != Some("bib") && ext != Some("tex") {
                     return;
                 }

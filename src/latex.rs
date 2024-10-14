@@ -2,14 +2,15 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::Command;
 use std::io::{self, Write};
+use std::fs;
 use anyhow::Result;
 use once_cell::sync::Lazy;
-use scraper::{Html, Selector};
+use scraper::{Html, Selector, Element};
 use regex::Regex;
 use markup5ever::interface::tree_builder::TreeSink;
 
 use crate::notes::{Outgoing, LineColumn, Span, Note};
-use crate::config::Config;
+use crate::config::{Config, self};
 
 #[derive(Default, Debug)]
 struct LatexNote {
@@ -23,24 +24,19 @@ struct LatexNote {
 }
 
 fn latex_to_html(config: &Config, content: String) -> String {
+    let preamble = fs::read_to_string(config::get_config_path().parent().unwrap().join("preamble.tex")).unwrap_or(r#"\usepackage[destlabel=true, backref=false]{{hyperref}}
+\usepackage{{amsmath, amsfonts, amsthm, thmtools, enumitem, mdframed}}
+"#.to_string());
+
     let tmp_dir = tempfile::TempDir::new().unwrap();
 
     let out_file = tmp_dir.path().join("main.tex");
     let mut f = std::fs::File::create(out_file.to_str().unwrap()).unwrap();
-    let content = format!(r#"\documentclass{{article}}
-\usepackage[destlabel=true, backref=false]{{hyperref}}
-\usepackage{{amsmath, amsfonts, amsthm, thmtools, enumitem, mdframed}}
 
-\DeclareMathOperator{{\prox}}{{prox}}
-
-\declaretheorem[name=Satz]{{theorem}}
-\declaretheorem[name=Beispiel]{{example}}
-\begin{{document}}
-{}
-\end{{document}}
-    "#, content); //&config.latex.preamble, content);
-
+    f.write(preamble.as_bytes()).unwrap();
+    f.write(b"\\begin{document}").unwrap();
     f.write(content.as_bytes()).unwrap();
+    f.write(b"\\end{document}").unwrap();
 
     let out_dir = tmp_dir.path().to_str().unwrap();
     let out = Command::new("make4ht")
@@ -58,20 +54,27 @@ fn latex_to_html(config: &Config, content: String) -> String {
 
         let mut document = Html::parse_document(&cont);
 
+        // remove all comments from HTML
         let rm = document.root_element().descendants().filter(|x| x.value().is_comment()).map(|x| x.id()).collect::<Vec<_>>();
         for id in rm {
             document.remove_from_parent(&id);
         }
 
+        // remove empty links which are used as anchors
         let rm = document.select(&Selector::parse("a").unwrap()).filter(|x| x.attr("href").is_none()).map(|x| x.id()).collect::<Vec<_>>();
 
         for id in rm {
             document.remove_from_parent(&id);
         }
 
-        let rm = document.root_element().descendants().filter(|x| x.value().as_text().map(|x| x.trim().is_empty()).unwrap_or(false)).map(|x| x.id()).collect::<Vec<_>>();
-        for id in rm {
-            document.remove_from_parent(&id);
+        // remove middle mrow for overline
+        let rm = document.select(&Selector::parse("mover mrow mrow").unwrap())
+            .map(|x| x.parent_element().unwrap())
+            .map(|x| (x.id(), x.parent_element().unwrap().id())).collect::<Vec<_>>();
+
+        for (a,b) in rm {
+            document.reparent_children(&a,&b);
+            document.remove_from_parent(&a);
         }
 
         let body = document.select(&Selector::parse("body div").unwrap()).next().unwrap();

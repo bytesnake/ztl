@@ -7,7 +7,25 @@ use crate::config::Config;
 
 pub(crate) fn render_html(config: &Config, content: &str) {
     let mut f = std::fs::File::create(".ztl/cache/out.html").unwrap();
+    f.write(r#"
+<html>
+<head><style>
+math{font-size:17px;}
+math[display="block"] {
+padding: 10px 0 10px 0;
+}
+mtable{padding: 5px 0 0 0;}
+mtd{padding: 0 5px 0 0 !important;}
+mspace{margin-left:10px;}
+.head {
+display: block;
+margin-bottom: 5px;
+}
+</style></head>
+<body>"#.as_bytes()).unwrap();
+
     f.write(content.as_bytes()).unwrap();
+    f.write(b"</body></html>").unwrap();
     f.flush().unwrap();
 
     let out = Command::new("bash").current_dir(".ztl/cache/").arg("-C").arg(&config.render).arg("out.html").spawn().unwrap().wait().unwrap(); 

@@ -30,6 +30,7 @@ function switchFile()
 	local fname = vim.fn.expand('%')
 	local fdir = string.upper(vim.fn.sha256(fname))
 	local fdir = current_fdl .. "/cache/" .. fdir
+
 	function update()
 		local succeeded, notes = pcall(toml.decode, tomlStr)
 
@@ -75,7 +76,7 @@ function M.setup(config)
   local_config = deep_extend('keep', config or {}, default_config)
 
   local ztl_group = ag("ztl", { clear = true })
-  au({"WinEnter"}, {
+  au({"BufEnter", "WinEnter"}, {
 	  group = ztl_group,
 	  pattern = { "*.md", "*.bib", "*.tex"},
 	  callback = function()
