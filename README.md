@@ -30,7 +30,7 @@ Options:
 
 ## Example with LaTeX
 
-
+![Peek 2024-10-16 19-43](https://github.com/user-attachments/assets/ba966a55-9b75-40e9-9249-68ac221ebd0b)
 
 ### WIP
 
