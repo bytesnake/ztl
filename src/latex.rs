@@ -23,7 +23,7 @@ struct LatexNote {
     parent: Option<String>,
 }
 
-fn latex_to_html(config: &Config, content: String) -> String {
+pub fn latex_to_html(config: &Config, content: String) -> String {
     let preamble = fs::read_to_string(config::get_config_path().parent().unwrap().join("preamble.tex")).unwrap_or(r#"\usepackage[destlabel=true, backref=false]{{hyperref}}
 \usepackage{{amsmath, amsfonts, amsthm, thmtools, enumitem, mdframed}}
 "#.to_string());
@@ -86,7 +86,7 @@ pub(crate) fn analyze(config: &Config, content: &str, source: &PathBuf) -> Resul
     let mut levels: Vec<LatexNote> = Vec::new();
     let mut notes = Vec::new();
 
-    static RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"\\hyperref\[(.*?)\]\{(.*?)\}").unwrap());
+    static RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"\\r\{(.*?)\}\{(.*?)\}").unwrap());
 
     for (i, line) in content.lines().map(|x| x.trim()).enumerate() {
         if line.starts_with("\\begin{") && line.contains("label") && line.contains("name") {
@@ -174,7 +174,6 @@ pub(crate) fn analyze(config: &Config, content: &str, source: &PathBuf) -> Resul
         ).flatten().collect();
 
         let content = note.content.join("\n");
-        let html = latex_to_html(&config, content.clone());
 
         Ok(Note {
             id: note.label,
@@ -182,10 +181,10 @@ pub(crate) fn analyze(config: &Config, content: &str, source: &PathBuf) -> Resul
             parent: note.parent,
             outgoing,
             incoming: Vec::new(),
-            html,
             span,
             file: None,
             hash: crate::utils::hash(&content),
+            html: content,
         })
     }).collect()
 }

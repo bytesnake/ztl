@@ -67,6 +67,10 @@ impl Note {
         self.hash.clone()
     }
 
+    pub(crate) fn is_tex(&self) -> bool {
+        self.span.source.as_ref().map(|x| x.ends_with(".tex")).unwrap_or(false)
+    }
+
     pub(crate) fn outgoing_spans(&self, notes: &Notes) -> Result<Spans> {
         self.outgoing.iter().enumerate().map(|(idx, s)| {
             let key = format!("{}:{},{}:{}", s.span.start.line,s.span.start.column.unwrap_or(1),s.span.end.line,s.span.end.column.unwrap_or(1));
@@ -116,6 +120,7 @@ impl Notes {
         let notes = glob::glob(&format!("{}/*", cache_path.to_str().unwrap()))
             .unwrap().filter_map(|x| x.ok())
             .filter(|x| x.file_name().unwrap().len() != 64)
+            .filter(|x| x.extension().is_none())
             .map(|x| toml::from_str(&std::fs::read_to_string(&x).unwrap()).unwrap())
             .map(|x: Note| (x.id.clone(), x))
             .collect();
@@ -123,9 +128,23 @@ impl Notes {
         Self { notes }
     }
 
-    pub fn from_files(pat: &str, config: &Config) -> Result<Self> {
+    pub fn empty() -> Self {
+        Self {
+            notes: HashMap::new(),
+        }
+    }
+
+    pub fn with_files(mut self, pat: &str, config: &Config) -> Result<Self> {
+        let notes = self.update_files(pat, config)?;
+
+        self.notes.extend(notes);
+
+        Ok(self)
+    }
+
+    pub fn update_files(&mut self, pat: &str, config: &Config) -> Result<HashMap<Key, Note>> {
         let arena = comrak::Arena::new();
-        let notes: Result<HashMap<Key, Note>> = glob(pat).unwrap()
+        glob(pat).unwrap()
             .filter_map(|x| x.ok())
             .filter(|x| !x.display().to_string().contains(".ztl"))
             .map(|x| {
@@ -138,17 +157,27 @@ impl Notes {
                     _ => panic!(""),
                 }
             })
-        .flatten_ok()
-        .map(|x| x.map(|x| (x.id.clone(), x)))
-        .collect();
+            .flatten_ok()
+            .map(|note| {
+                let mut note = note?;
+                if !note.is_tex() {
+                    return Ok(note);
+                }
 
-        notes.map(|notes| Self { notes })
-    }
+                if let Some(x) = self.notes.get(&note.id) {
+                    if x.hash == note.hash {
+                        // take old HTML artifact without re-rendering
+                        note.html = x.html.clone();
+                        return Ok(note);
+                    }
+                }
 
-    pub fn extend(mut self, other: Self) -> Self {
-        self.notes.extend(other.notes);
+                note.html = crate::latex::latex_to_html(&config, note.html);
 
-        self
+                Ok(note)
+            })
+            .map(|x| x.map(|x| (x.id.clone(), x)))
+            .collect()
     }
 
     pub fn update_incoming_links(&mut self) {

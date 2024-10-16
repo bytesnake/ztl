@@ -39,9 +39,10 @@ fn main() -> Result<()> {
 fn build(config: Config) -> Result<()> {
     println!("Rebuilding notes from scratch ..");
 
-    let mut notes = notes::Notes::from_files("**/*.md", &config)?
-        .extend(notes::Notes::from_files("**/*.bib", &config)?)
-        .extend(notes::Notes::from_files("**/*.tex", &config)?);
+    let mut notes = notes::Notes::from_cache()
+        .with_files("**/*.md", &config)?
+        .with_files("**/*.bib", &config)?
+        .with_files("**/*.tex", &config)?;
 
     notes.update_incoming_links();
 
@@ -111,11 +112,7 @@ fn watch(config: config::Config) -> Result<()> {
                 match event.kind {
                    notify::EventKind::Modify(notify::event::ModifyKind::Data(_)) => {
                        let path = path.to_str().unwrap().to_string();
-
-                       println!("Update file {} ..", path);
-                       notes::Notes::from_files(&path, &config).unwrap()
-                           .notes.into_values()
-                           .for_each(|x| s.send(x).unwrap());
+                       s.send(path).unwrap();
                    },
                    _ => {}
                }
@@ -129,16 +126,23 @@ fn watch(config: config::Config) -> Result<()> {
 
     println!("Watching for file changes ..");
 
-    let mut notes = notes::Notes::from_files("**/*.md", &c2)?
-        .extend(notes::Notes::from_files("**/*.bib", &c2)?)
-        .extend(notes::Notes::from_files("**/*.tex", &c2)?);
+    let mut notes = notes::Notes::from_cache()
+        .with_files("**/*.md", &c2)?
+        .with_files("**/*.bib", &c2)?
+        .with_files("**/*.tex", &c2)?;
 
-    while let Ok(x) = r.recv() {
-        if x.has_changed() {
-            utils::render_html(&c2, &x.html);
+    while let Ok(path) = r.recv() {
+        println!("Update file {} ..", path);
+
+        let new_notes = notes.update_files(&path, &config)?;
+
+        for (key, x) in &new_notes {
+            if x.has_changed() {
+                utils::render_html(&c2, &x.html);
+            }
         }
 
-        notes.notes.insert(x.id.clone(), x);
+        notes.notes.extend(new_notes);
         notes.update_incoming_links();
 
         write_notes(&notes)?;
