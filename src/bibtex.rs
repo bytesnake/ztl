@@ -23,6 +23,7 @@ pub(crate) fn analyze(content: &str, source: &PathBuf) -> Result<Vec<Note>> {
             start: LineColumn { line: span.0, column: None },
             end: LineColumn { line: span.1, column: None },
         };
+        let target = bib.file().ok().or_else(|| bib.url().ok()).clone();
 
         Ok(Note {
             id: bib.key.clone(),
@@ -32,8 +33,9 @@ pub(crate) fn analyze(content: &str, source: &PathBuf) -> Result<Vec<Note>> {
             incoming: Vec::new(),
             html: String::new(),
             span,
-            file: Some(bib.file().clone().unwrap_or("".to_string())),
+            target,
             hash: crate::utils::hash(&bib.key),
+            public: false,
         })
     }).collect()
 }

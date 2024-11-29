@@ -6,6 +6,8 @@ use clap::Parser;
 use sha2::Digest;
 use anyhow::{Result, Context};
 use notify::{Watcher, RecursiveMode,};
+use dyn_fmt::AsStrFormatExt;
+use which::which;
 
 mod commands;
 mod config;
@@ -25,12 +27,14 @@ fn main() -> Result<()> {
     let config = fs::read_to_string(&config)
         .context("Failed to read configuration file")?;
 
-    let config: config::Config = toml::from_str(&config)
+    let mut config: config::Config = toml::from_str(&config)
         .context("Failed to parse configuration")?;
+
+    config.public = config.public.into_iter().map(|x| glob::glob(&x).unwrap()).flatten().map(|x| x.unwrap().display().to_string()).collect();
 
     match cli.command {
         Some(commands::Commands::Build) => build(config),
-        Some(commands::Commands::Publish) => publish(config),
+        Some(commands::Commands::Publish(res)) => publish(config, res),
         Some(commands::Commands::Watch) => watch(config),
         None => analyze(),
     }
@@ -151,7 +155,7 @@ fn watch(config: config::Config) -> Result<()> {
     Ok(())
 }
 
-fn publish(config: config::Config) -> Result<()> {
+fn publish(config: config::Config, cmds: commands::Publish) -> Result<()> {
     let published_path = config::get_config_path()
         .parent().unwrap().join("published");
 
@@ -159,21 +163,111 @@ fn publish(config: config::Config) -> Result<()> {
         .map(|x| toml::from_str(&x).unwrap())
         .unwrap_or(HashMap::new());
 
-    for note in notes::Notes::from_cache().notes.values() {
+    let toot_cmd = config.toot.unwrap_or_else(|| which("toot").unwrap().display().to_string());
+
+    if cmds.delete_all {
+        for k in hash.values() {
+            let cmd = format!("{} delete {}", toot_cmd, &k.1);
+
+            println!("Deleting {}", &k.1);
+            let out = std::process::Command::new("sh")
+                .arg("-c")
+                .arg(&cmd)
+                .output()
+                .expect("failed to execute process");
+        }
+        panic!("DELETETE");
+    }
+
+    let mut queue: Vec<String> = Vec::new();
+    let mut notes = notes::Notes::from_cache().notes;
+    let mut it = notes.keys();
+
+    loop {
+        let key = match queue.pop() {
+            Some(x) => x,
+            None => match it.next() {
+                Some(x) => x.to_string(),
+                None => break,
+            },
+        };
+
+        let note = notes.get(&key).unwrap();
+
+        if note.html.trim().is_empty() {
+            continue;
+        }
+        let html = note.html.replace("\n", " ").replace("xmlns=\"http://www.w3.org/1998/Math/MathML\"", "");
+
         match hash.get(&note.id).clone() {
             Some(x) => {
                 if note.hash() == x.0 {
                     continue;
                 }
 
+                let visibility = match note.public {
+                    true => "public",
+                    false => "direct",
+                };
+
+                let cmd = format!("{} post --visibility {} \"{}\" --status-id {}", toot_cmd, visibility, &html, &x.1);
                 println!("Changed {}", note.id);
-                hash.insert(note.id.clone(), (note.hash(), "".to_string()));
+
+                let out = std::process::Command::new("sh")
+                    .arg("-c")
+                    .arg(&cmd)
+                    .output()
+                    .expect("failed to execute process");
+
+                hash.get_mut(&note.id).unwrap().0 = note.hash();
             },
             None => {
+                let parent = match &note.parent {
+                    Some(parent) => {
+                        if !hash.contains_key(parent) {
+                            queue.push(note.id.clone());
+                            queue.push(parent.clone());
+                            //println!("NEXT ELEMENT {:?}", queue);
+                            continue;
+                        }
+
+                        Some(hash.get(parent).unwrap().1.clone())
+                    },
+                    _ => None,
+                };
+
+                let visibility = match note.public {
+                    true => "public",
+                    false => "direct",
+                };
+                let mut cmd = format!("{} post --visibility {} \"{}\"", toot_cmd, visibility, &html);
+
+                if let Some(parent) = parent {
+                    cmd = format!("{} --reply-to {}", cmd, parent);
+                };
+
+                let out = std::process::Command::new("sh")
+                    .arg("-c")
+                    .arg(&cmd)
+                    .output()
+                    .expect("failed to execute process");
+
+                let err = std::str::from_utf8(&out.stderr).unwrap();
+                let out = std::str::from_utf8(&out.stdout).unwrap();
+                dbg!(&err);
+                let out = out.split("/").collect::<Vec<_>>();
+                let out = out[out.len()-1].trim();
+
                 println!("Publish {}", note.id);
+                hash.insert(note.id.clone(), (note.hash(), out.to_string()));
             }
         }
     }
+
+    let out_str = toml::to_string(&hash).unwrap();
+
+    let mut file = std::fs::File::create(&published_path).unwrap();
+    file.write(out_str.as_bytes()).unwrap();
 
     Ok(())
 }

@@ -11,12 +11,19 @@ pub(crate) struct Cli {
     pub command: Option<Commands>,
 }
 
+#[derive(Parser, Debug)]
+#[command(version, about, long_about = None)]
+pub(crate) struct Publish {
+    #[arg(short, long)]
+    pub delete_all: bool,
+}
+
 #[derive(Subcommand, Debug)]
 pub(crate) enum Commands {
     /// Watch files and rebuild
     Watch,
     /// Publish notes to Mastodon instance
-    Publish,
+    Publish(Publish),
     /// Build all notes from scratch
     Build,
 }

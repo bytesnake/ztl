@@ -36,5 +36,5 @@ Options:
 
  - [x] support for Markdown and LaTeX rendering
  - [x] generate cache for navigation plugins in editor
- - [ ] publish set of notes to Mastodon
+ - [x] publish set of notes to Mastodon
  - [ ] write more complete documentation and installation guide

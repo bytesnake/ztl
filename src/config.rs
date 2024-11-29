@@ -11,6 +11,9 @@ pub(crate) struct Latex {
 pub(crate) struct Config {
     pub latex: Latex,
     pub render: String,
+    pub toot: Option<String>,
+    #[serde(default)]
+    pub public: Vec<String>,
 }
 
 pub(crate) fn get_config_path() -> PathBuf {

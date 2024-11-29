@@ -7,7 +7,8 @@ local au = vim.api.nvim_create_autocmd
 local deep_extend = vim.tbl_deep_extend
 
 local default_config = {
-	pdf_viewer = 'okular {file}'
+	pdf_viewer = 'okular {file}',
+	url_viewer = 'firefox {url}'
 }
 
 local watcher = nil
@@ -84,6 +85,12 @@ function M.setup(config)
 	  end
   })
 
+  -- check for .ztl subfolder and modify lualine if exists
+  folder = vim.fn.finddir(".ztl", vim.fn.expand('%:p') .. ";/")
+  if folder == "" then
+	  return;
+  end
+
   require('lualine').setup({
   	sections = { 
   		lualine_b = {current_target},
@@ -117,9 +124,23 @@ function M.setup(config)
   
   	succeeded, note = pcall(toml.decodeFromFile, ".ztl/cache/" .. outgoing["target"])
   
-	if note["file"] ~= nil then
-		if note["file"]:sub(-4) == ".pdf" then
-			local file = note["file"]
+	if note["target"] ~= nil then
+		if string.sub(note["target"], 1, 4) == "http" then
+			local file = note["target"]
+
+			local view = outgoing["view"]
+			if view["anchor"] ~= nil then
+				file = file .. "#" .. view["anchor"]
+			end
+
+			local cmd = config["url_viewer"](file, view["page"], view["search"])
+			vim.fn.jobstart(cmd, {
+				on_error = function(err)
+					vim.notify("Could not start website viewer", "error")
+				end
+			})
+		elseif note["target"]:sub(-4) == ".pdf" then
+			local file = note["target"]
 
 			local view = outgoing["view"]
 			if view["anchor"] ~= nil then
@@ -127,14 +148,13 @@ function M.setup(config)
 			end
 
 			local cmd = config["pdf_viewer"](file, view["page"], view["search"])
-			vim.notify(cmd)
 			vim.fn.jobstart(cmd, {
 				on_error = function(err)
 					vim.notify("Could not start pdf viewer", "error")
 				end
 			})
-		elseif note["file"]:sub(-3) == ".md" then
-			local file = vim.fs.normalize(note["file"])
+		elseif note["target"]:sub(-3) == ".md" then
+			local file = vim.fs.normalize(note["target"])
 			if file[0] ~= "/" then
 				file = vim.fs.normalize(vim.fn.fnamemodify(current_fdl, ":h:h") .. "/" .. file)
 			end
@@ -168,11 +188,12 @@ function M.setup(config)
 				vim.api.nvim_set_current_tabpage(tabpage)
 			end
 		else
-			vim.notify("Target " .. note["file"] .. " not supported", "error")
+			vim.notify("Target " .. note["target"] .. " not supported", "error")
 		end
 	else
 		vim.cmd("normal! m'")
-		vim.api.nvim_win_set_cursor(0, {note["span"]["start"]["line"], 0})
+		vim.cmd("edit " .. note["span"]["source"])
+		vim.api.nvim_win_set_cursor(0, {note["span"]["start"]["line"] + 1, 0})
 	end
   end)
 end

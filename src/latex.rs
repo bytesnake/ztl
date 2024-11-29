@@ -40,7 +40,7 @@ pub fn latex_to_html(config: &Config, content: String) -> String {
 
     let out_dir = tmp_dir.path().to_str().unwrap();
     let out = Command::new("make4ht")
-        .args(["-c", "/home/losch@alabsad.fau.de/Note/.ztl/thmtav.cfg", "-m", "draft", out_file.to_str().unwrap()])
+        .args(["-a", "debug", "-c", "/home/losch@alabsad.fau.de/Note/.ztl/thmtav.cfg", "-m", "draft", out_file.to_str().unwrap()])
         .current_dir(out_dir)
         .output().unwrap();
 
@@ -182,9 +182,10 @@ pub(crate) fn analyze(config: &Config, content: &str, source: &PathBuf) -> Resul
             outgoing,
             incoming: Vec::new(),
             span,
-            file: None,
+            target: None,
             hash: crate::utils::hash(&content),
             html: content,
+            public: false,
         })
     }).collect()
 }

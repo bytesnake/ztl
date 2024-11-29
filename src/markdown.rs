@@ -38,9 +38,10 @@ pub(crate) fn analyze<'a>(arena: &'a Arena<AstNode<'a>>, content: &str, source: 
             } else if level == levels.len() + 1 {
                 levels.push(key.clone());
             } else if level == levels.len() {
-            levels[level-1] = key.clone();
-        } else {
+                levels[level-1] = key.clone();
+            } else {
                 levels.truncate(level);
+                levels[level-1] = key.clone();
             };
 
             let parent = levels.get(level - 2).map(|x: &String| x.to_string());
@@ -115,10 +116,38 @@ pub(crate) fn analyze<'a>(arena: &'a Arena<AstNode<'a>>, content: &str, source: 
                     span,
                 });
             }
+            for child in node.children() {
+                let replace_by = if let NodeValue::Heading(NodeHeading { .. }) = child.data.borrow_mut().value {
+                    let label = match &child.first_child().unwrap().data.borrow().value {
+                        NodeValue::Text(text) => text.clone(),
+                        _ => panic!("No label available"),
+                    };
+
+                    //// check that the first character is ascii and lower-case
+                    if label.starts_with(|x: char| !x.is_ascii() || x.is_ascii_uppercase()) {
+                        continue;
+                    }
+
+                    let parts = label.splitn(2, " ").collect::<Vec<_>>();
+                    let (key, header) = (parts[0].to_string(), parts[1].to_string());
+                    
+                    Some(format!("#{} — {}", key, header))
+                } else {
+                    None
+                };
+
+                if let Some(text) = replace_by {
+                    child.data.borrow_mut().value = NodeValue::HtmlInline(format!("<h3>{}</h3>", text));
+
+                    child.first_child().unwrap().detach();
+                }
+            }
         }
 
         let mut html = vec![];
-        format_html(&node, &Options::default(), &mut html).unwrap();
+        let mut opts = Options::default();
+        opts.render.unsafe_ = true;
+        format_html(&node, &opts, &mut html).unwrap();
         let html = String::from_utf8(html).unwrap();
 
         Note {
@@ -130,7 +159,8 @@ pub(crate) fn analyze<'a>(arena: &'a Arena<AstNode<'a>>, content: &str, source: 
             hash: crate::utils::hash(&html),
             html,
             span,
-            file: None,
+            target: None,
+            public: false,
         }
     }).collect::<Vec<_>>();
 

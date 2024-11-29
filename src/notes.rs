@@ -43,8 +43,10 @@ pub(crate) struct Note {
     pub incoming: Vec<Key>,
     pub html: String,
     pub span: Span,
-    pub file: Option<String>,
+    pub target: Option<String>,
     pub hash: String,
+    #[serde(default)]
+    pub public: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -97,9 +99,12 @@ impl Note {
     }
 
     pub(crate) fn has_changed(&self) -> bool {
-        let content = fs::read_to_string(
+        let content = match fs::read_to_string(
             crate::config::get_config_path().parent().unwrap()
-            .join("cache").join(&self.id)).unwrap();
+            .join("cache").join(&self.id)) {
+            Ok(x) => x,
+            Err(_) => return false,
+        };
 
         let old: Note = toml::from_str(&content).unwrap();
 
@@ -160,6 +165,8 @@ impl Notes {
             .flatten_ok()
             .map(|note| {
                 let mut note = note?;
+                note.public = note.span.source.as_ref().map(|x| config.public.contains(&x)).unwrap_or(false);
+
                 if !note.is_tex() {
                     return Ok(note);
                 }
