@@ -178,6 +178,7 @@ pub(crate) fn analyze(config: &Config, content: &str, source: &PathBuf) -> Resul
         Ok(Note {
             id: note.label,
             header: note.title,
+            kind: Some(note.env_kind),
             parent: note.parent,
             outgoing,
             incoming: Vec::new(),

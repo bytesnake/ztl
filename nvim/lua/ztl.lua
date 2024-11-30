@@ -37,9 +37,10 @@ function switchFile()
 
 		-- Decode from file
 		succeeded, spans = pcall(toml.decodeFromFile, fdir)
-
-		--print(spans)
 		current_span = spans
+
+		vim.opt.foldexpr = 'v:lua.get_my_foldlevel()'
+		vim.opt.foldtext = 'v:lua.get_fold_text()'
 
 		return fdir
 	end
@@ -57,18 +58,80 @@ function switchFile()
 	end})
 end
 
+_G.get_my_foldlevel = function()
+	if current_span == nil then
+		return 0
+	end
+
+	local num_fold = 0
+	for k,v in pairs(current_span) do
+  		local parts = {k:match'(%d+)%:(%d+)'}
+		if vim.v.lnum >= tonumber(parts[1]) and vim.v.lnum <= tonumber(parts[2]) then
+			num_fold = num_fold + 1
+		end
+	end
+
+	for k,v in pairs(current_span) do
+  		local parts = {k:match'(%d+)%:(%d+)'}
+		if vim.v.lnum == tonumber(parts[1]) then
+			return ">" .. num_fold
+		end
+		if vim.v.lnum == tonumber(parts[2]) then
+			return "<" .. num_fold
+		end
+	end
+
+	return num_fold
+end
+
+_G.get_fold_text = function()
+	if current_span == nil then
+		return ""
+	end
+
+	local longest_target = 0
+	for k,v in pairs(current_span) do
+		local target = v["target"]
+		if v["kind"] ~= nil then
+			target = v["kind"] .. "(" .. target .. ")"
+		end
+		
+		if string.len(target) > longest_target then
+			longest_target = string.len(target)
+		end
+	end
+
+	for k,v in pairs(current_span) do
+  		local parts = {k:match'(%d+)%:(%d+)'}
+		if vim.v.foldstart == tonumber(parts[1]) and vim.v.foldend == tonumber(parts[2]) then
+			local target = v["target"]
+			if v["kind"] ~= nil then
+				target = v["kind"] .. "(" .. target .. ")"
+			end
+			local num_whitespace = longest_target - string.len(target) + 2
+				
+			return "╠" .. string.rep("═", vim.v.foldlevel) .. " " .. target .. string.rep(" ", num_whitespace) .. v["header"]
+		end
+	end
+
+	return "Unknown"
+end
+
 function current_note()
 	local row, col = unpack(vim.api.nvim_win_get_cursor(0))
 
 	local closest = 0
-	for k in pairs(current_span) do
-		local k = tonumber(k)
-		if closest < k and k <= row then
-			closest = k
+	local index = ""
+	for k,v in pairs(current_span) do
+  		local parts = {k:match'(%d+)%:(%d+)'}
+		local p = tonumber(parts[1])
+		if closest < p and p <= row then
+			closest = p
+			index = k
 		end
 	end
 
-	return current_span[tostring(closest)]
+	return current_span[index]
 end
 
 local M = {}

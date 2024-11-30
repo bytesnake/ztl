@@ -38,6 +38,7 @@ pub(crate) struct Span {
 pub(crate) struct Note {
     pub id: Key,
     pub header: String,
+    pub kind: Option<String>,
     pub parent: Option<Key>,
     pub outgoing: Vec<Outgoing>,
     pub incoming: Vec<Key>,
@@ -61,6 +62,7 @@ pub(crate) struct NodeOutgoing {
 pub(crate) struct Spans {
     target: Key,
     header: String,
+    kind: Option<String>,
     outgoing: HashMap<String, NodeOutgoing>,
 }
 
@@ -90,12 +92,16 @@ impl Note {
             Ok((key, target_node))
         }).collect::<Result<HashMap<_, _>>>().map(|spans|
             Spans {
-                target: self.id.clone(), header: self.header.clone(), outgoing: spans
+                target: self.id.clone(), header: self.header.clone(), kind: self.kind.clone(), outgoing: spans
             })
     }
 
     pub(crate) fn start_line(&self) -> String {
         self.span.start.line.to_string()
+    }
+
+    pub(crate) fn end_line(&self) -> String {
+        (self.span.end.line + 1).to_string()
     }
 
     pub(crate) fn has_changed(&self) -> bool {
@@ -210,7 +216,7 @@ impl Notes {
             .into_iter()
             .map(|(file, notes)| {
                 let notes = notes.into_iter().map(|note|
-                    note.outgoing_spans(&self).map(|s| (note.start_line(), s))
+                    note.outgoing_spans(&self).map(|s| (format!("{}:{}", note.start_line(), note.end_line()), s))
                 ).collect::<Result<HashMap<_, Spans>>>();
 
                 notes.map(|notes| (file, notes))

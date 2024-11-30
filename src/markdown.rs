@@ -10,11 +10,11 @@ pub(crate) fn analyze<'a>(arena: &'a Arena<AstNode<'a>>, content: &str, source: 
     let root = parse_document(&arena, content, &Options::default());
 
     // first separate document into notes
-    let mut nodes: Vec<(String, String, Option<String>, &'a AstNode<'a>, Span)> = vec![];
+    let mut nodes: Vec<(String, String, Option<String>, &'a AstNode<'a>, Span, usize)> = vec![];
     let mut levels = Vec::new();
 
     for child in root.children() {
-        let (key, header, parent) = if let NodeValue::Heading(NodeHeading { level, .. }) = &child.data.borrow().value {
+        let (key, header, parent, level) = if let NodeValue::Heading(NodeHeading { level, .. }) = &child.data.borrow().value {
             let label = match &child.first_child().unwrap().data.borrow().value {
                 NodeValue::Text(text) => text.clone(),
                 _ => panic!("No label available"),
@@ -45,7 +45,7 @@ pub(crate) fn analyze<'a>(arena: &'a Arena<AstNode<'a>>, content: &str, source: 
             };
 
             let parent = levels.get(level - 2).map(|x: &String| x.to_string());
-            (key, header, parent)
+            (key, header, parent, level)
         } else {
             if nodes.len() > 0 {
                 nodes[nodes.len() - 1].3.append(child);
@@ -53,7 +53,7 @@ pub(crate) fn analyze<'a>(arena: &'a Arena<AstNode<'a>>, content: &str, source: 
             continue;
         };
 
-        let pos = LineColumn {
+        let mut pos = LineColumn {
             line: child.data.borrow().sourcepos.start.line,
             column: None,
         };
@@ -64,20 +64,38 @@ pub(crate) fn analyze<'a>(arena: &'a Arena<AstNode<'a>>, content: &str, source: 
             end: Default::default(),
         };
 
-        nodes.last_mut().map(|x| x.4.end = pos);
         let root = arena.alloc(NodeValue::Document.into());
         root.append(child);
 
         nodes.push(
-            (key.clone(), header, parent, root, span));
+            (key.clone(), header, parent, root, span, level));
     }
-    nodes.last_mut().map(|x| x.4.end = LineColumn {
-        line: content.split("\n").count() - 1,
-        column: None,
-    });
+
+    // find ending of notes
+    for i in 0..nodes.len() {
+        let mut index = nodes.len();
+        'inner: for j in (i+1)..nodes.len() {
+            if nodes[j].5 <= nodes[i].5 {
+                index = j;
+                break 'inner;
+            }
+        }
+            
+        if index < nodes.len() {
+            nodes[i].4.end = LineColumn {
+                line: nodes[index].4.start.line - 2,
+                column: None,
+            };
+        } else {
+            nodes[i].4.end = LineColumn {
+                line: content.split("\n").count() - 2,
+                column: None,
+            };
+        };
+    }
 
     // parse notes to HTML and outgoing
-    let notes = nodes.into_iter().map(|(key, header, parent, node, span)| {
+    let notes = nodes.into_iter().map(|(key, header, parent, node, span, _)| {
         let mut outgoing: Vec<Outgoing> = vec![];
 
         for node in node.descendants() {
@@ -153,6 +171,7 @@ pub(crate) fn analyze<'a>(arena: &'a Arena<AstNode<'a>>, content: &str, source: 
         Note {
             id: key,
             header,
+            kind: None,
             parent,
             outgoing,
             incoming: Vec::new(),

@@ -20,14 +20,16 @@ pub(crate) fn analyze(content: &str, source: &PathBuf) -> Result<Vec<Note>> {
     bib.into_iter().zip(spans.into_iter()).map(|(bib, span)| {
         let span = Span {
             source: Some(source.to_str().unwrap().to_string()),
-            start: LineColumn { line: span.0, column: None },
+            start: LineColumn { line: span.0 + 1, column: None },
             end: LineColumn { line: span.1, column: None },
         };
         let target = bib.file().ok().or_else(|| bib.url().ok()).clone();
+        let header = bib.title().ok().and_then(|x| x.first()).map(|x| x.v.get()).unwrap_or("").to_string();
+        let kind = Some(bib.entry_type.to_string());
 
         Ok(Note {
             id: bib.key.clone(),
-            header: bib.title().ok().and_then(|x| x.first()).map(|x| x.v.get()).unwrap_or("").to_string(),
+            header, kind, 
             parent: None,
             outgoing: Vec::new(),
             incoming: Vec::new(),
