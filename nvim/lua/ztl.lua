@@ -8,11 +8,41 @@ local deep_extend = vim.tbl_deep_extend
 
 local default_config = {
 	pdf_viewer = 'okular {file}',
-	url_viewer = 'firefox {url}'
+	url_viewer = 'firefox {url}',
+	suggestion = {
+		prompts = {
+			"Can you suggest possible improvements?",
+			"What other possible atomic notes could be connected to this one?",
+			"Can you come up with other topic to write about?",
+			"Can you write a table of content with three levels for a book based on the note but extend it also to possible other topics?",
+			"Custom Prompt",
+		},
+		callback = function(prompt, cb)
+			local cmd = "curl \"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=AIzaSyCZQV38_Wuj1ZH956IC_1CBzg4islXVfZQ\" -H 'Content-Type: application/json' -X POST -d '{\"contents\": [{\"parts\":[{\"text\": \"" .. prompt .. "\"}] }]}'"
+
+			vim.fn.jobstart(cmd, {
+				on_error = function(err)
+					vim.notify("Could not start curl", "error")
+				end,
+				stdout_buffered = true,
+				on_stdout = function(_, stdout)
+					local tmp = table.concat(stdout, "\n")
+					local buf = vim.json.decode(tmp)
+
+					local out = ""
+					for _,text in ipairs(buf["candidates"][1]["content"]["parts"])do
+						out = out .. text["text"] .. "\n\n"
+					end
+
+					cb(out)
+				end,
+			})
+		end
+	}
 }
 
 local watcher = nil
-local current_note = {}
+local cur_note = {}
 local current_fdl = ""
 
 function switchFile()
@@ -125,6 +155,10 @@ function current_note()
 	for k,v in pairs(current_span) do
   		local parts = {k:match'(%d+)%:(%d+)'}
 		local p = tonumber(parts[1])
+		if p == nil then
+			return
+		end
+			
 		if closest < p and p <= row then
 			closest = p
 			index = k
@@ -134,10 +168,72 @@ function current_note()
 	return current_span[index]
 end
 
+local buffer_number = -1
+
+local function log(_, data)
+    if data then
+        -- Make it temporarily writable so we don't have warnings.
+        vim.api.nvim_buf_set_option(buffer_number, "readonly", false)
+        
+        -- Append the data.
+        vim.api.nvim_buf_set_lines(buffer_number, -1, -1, true, vim.split(data, "\n"))
+
+        -- Make readonly again.
+        vim.api.nvim_buf_set_option(buffer_number, "readonly", true)
+
+        -- Mark as not modified, otherwise you'll get an error when
+        -- attempting to exit vim.
+        vim.api.nvim_buf_set_option(buffer_number, "modified", false)
+
+        -- Get the window the buffer is in and set the cursor position to the bottom.
+        local buffer_window = vim.api.nvim_call_function("bufwinid", { buffer_number })
+        local buffer_line_count = vim.api.nvim_buf_line_count(buffer_number)
+        vim.api.nvim_win_set_cursor(buffer_window, { buffer_line_count, 0 })
+    end
+end
+
+local function open_buffer()
+    -- Get a boolean that tells us if the buffer number is visible anymore.
+    --
+    -- :help bufwinnr
+    local buffer_visible = vim.api.nvim_call_function("bufwinnr", { buffer_number }) ~= -1
+
+    if buffer_number == -1 or not buffer_visible then
+        -- Create a new buffer with the name "AUTOTEST_OUTPUT".
+        -- Same name will reuse the current buffer.
+        vim.api.nvim_command("botright split llm-response")
+        
+        -- Collect the buffer's number.
+        buffer_number = vim.api.nvim_get_current_buf()
+        
+        -- Mark the buffer as readonly.
+        vim.opt_local.readonly = true
+    end
+end
+
+local sets = {{97, 122}, {48, 57}} -- a-z, 0-9
+local function string_random(chars)
+	local str = ""
+	for i = 1, chars do
+		math.randomseed(os.clock() ^ 5)
+		local charset = sets[ math.random(1, #sets) ]
+		str = str .. string.char(math.random(charset[1], charset[2]))
+	end
+	return str
+end
+
 local M = {}
 
 function M.setup(config)
   local_config = deep_extend('keep', config or {}, default_config)
+
+  vim.cmd([[
+  	syn region markdownLink matchgroup=markdownLinkDelimiter start="(" end=")" contains=markdownUrl keepend contained conceal
+  	syn region markdownLinkText matchgroup=markdownLinkTextDelimiter start="!\=\[\%(\%(\_[^][]\|\[\_[^][]*\]\)*]\%( \=[[(]\)\)\@=" end="\]\%( \=[[(]\)\@=" nextgroup=markdownLink,markdownId skipwhite contains=@markdownInline,markdownLineStart concealends
+  	set conceallevel=2
+  	highlight markdownLinkText ctermfg=red guifg=#076678 cterm=bold term=bold gui=bold
+  	set concealcursor=nc
+  ]])
 
   local ztl_group = ag("ztl", { clear = true })
   au({"BufEnter", "WinEnter"}, {
@@ -145,6 +241,22 @@ function M.setup(config)
 	  pattern = { "*.md", "*.bib", "*.tex"},
 	  callback = function()
 		switchFile()
+	  end
+  })
+  au({"CursorMoved"}, {
+	  group = ztl_group,
+	  pattern = { "*.md", "*.bib", "*.tex"},
+	  callback = function()
+		local note = current_note()
+		if note == nil then
+			return
+		end
+
+		if cur_note["target"] ~= note["target"] then
+			local file = io.open(".ztl/cache/" .. note["target"] .. ".sixel.show", "w")
+			file.close()
+		end
+		cur_note = note
 	  end
   })
 
@@ -163,6 +275,46 @@ function M.setup(config)
   	},
   })
   
+  vim.keymap.set('n', 'gb', function() 
+  	local span = current_note()
+  	succeeded, note = pcall(toml.decodeFromFile, ".ztl/cache/" .. span["target"])
+  
+	local items = {}
+	for _,k in ipairs(note["incoming"]) do
+		succeeded, target = pcall(toml.decodeFromFile, ".ztl/cache/" .. k)
+		table.insert(items, {filename=target["span"]["source"], lnum=target["span"]["start"]["line"], end_lnum=target["span"]["end"]["line"], text=target["header"]})
+	end
+	vim.fn.setloclist(0, items)
+  end)
+
+  vim.keymap.set('n', 'gs', function()
+	  vim.ui.select(local_config["suggestion"]["prompts"], {
+			prompt = 'Which prompt to use',
+		}, function(choice)
+			local span = current_note()
+			succeeded, note = pcall(toml.decodeFromFile, ".ztl/cache/" .. span["target"])
+
+			local html = note["html"]:gsub("([%c%z\"'\\{}])", "\\%1")
+
+			local cb = function(elm) 
+				local prompt = elm .. "\n\nThe following contains the note in HTML5 formatted with possible MathML\nPlease reply in markdown and maximum linewidth of 70 characters\n" .. html
+
+				local resp = local_config["suggestion"]["callback"](prompt, function(resp)
+					open_buffer()
+					log("", resp)
+				end)
+			end
+
+			if choice == "Custom Prompt" then
+				vim.ui.input({ prompt = "Enter custom prompt: " }, function(input)
+					cb(tostring(input))
+				end)
+			else
+				cb(choice)
+			end
+		end)
+  end)
+
   vim.keymap.set('n', 'gf', function() 
   	local span = current_note()
   	local row, col = unpack(vim.api.nvim_win_get_cursor(0))
@@ -177,35 +329,30 @@ function M.setup(config)
   		end
   	end
   
-  	if target == nil then
-  		return
-  	end
-  
   	succeeded, note = pcall(toml.decodeFromFile, ".ztl/cache/" .. span["target"])
   
-  	local outgoing = note["outgoing"][tonumber(target["index"]) + 1]
-  
-  	succeeded, note = pcall(toml.decodeFromFile, ".ztl/cache/" .. outgoing["target"])
+	local view = {}
+	if note["target"] == nil and target == nil then
+		local items = {}
+		for k,v in pairs(span["outgoing"]) do
+			local outgoing = span["outgoing"][k]
+			succeeded, target = pcall(toml.decodeFromFile, ".ztl/cache/" .. outgoing["target"])
+			local index = outgoing["index"]
+			local label = note["outgoing"][index+1]
+			table.insert(items, {filename=v["source"], lnum=target["span"]["start"]["line"], end_lnum=target["span"]["end"]["line"], text=label["label"] .. " -> " .. v["header"]})
+		end
+		vim.fn.setloclist(0, items)
+  		return
+	elseif note["target"] == nil then
+		local outgoing = note["outgoing"][tonumber(target["index"]) + 1]
+		view = outgoing["view"]
+		succeeded, note = pcall(toml.decodeFromFile, ".ztl/cache/" .. outgoing["target"])
+	end
   
 	if note["target"] ~= nil then
-		if string.sub(note["target"], 1, 4) == "http" then
+		if note["target"]:sub(-4) == ".pdf" then
 			local file = note["target"]
 
-			local view = outgoing["view"]
-			if view["anchor"] ~= nil then
-				file = file .. "#" .. view["anchor"]
-			end
-
-			local cmd = config["url_viewer"](file, view["page"], view["search"])
-			vim.fn.jobstart(cmd, {
-				on_error = function(err)
-					vim.notify("Could not start website viewer", "error")
-				end
-			})
-		elseif note["target"]:sub(-4) == ".pdf" then
-			local file = note["target"]
-
-			local view = outgoing["view"]
 			if view["anchor"] ~= nil then
 				file = file .. "#" .. view["anchor"]
 			end
@@ -214,6 +361,20 @@ function M.setup(config)
 			vim.fn.jobstart(cmd, {
 				on_error = function(err)
 					vim.notify("Could not start pdf viewer", "error")
+				end
+			})
+		elseif string.sub(note["target"], 1, 4) == "http" then
+
+			local file = note["target"]
+
+			if view["anchor"] ~= nil then
+				file = file .. "#" .. view["anchor"]
+			end
+
+			local cmd = config["url_viewer"](file, view["page"], view["search"])
+			vim.fn.jobstart(cmd, {
+				on_error = function(err)
+					vim.notify("Could not start website viewer", "error")
 				end
 			})
 		elseif note["target"]:sub(-3) == ".md" then
@@ -256,8 +417,16 @@ function M.setup(config)
 	else
 		vim.cmd("normal! m'")
 		vim.cmd("edit " .. note["span"]["source"])
-		vim.api.nvim_win_set_cursor(0, {note["span"]["start"]["line"] + 1, 0})
+		vim.api.nvim_win_set_cursor(0, {note["span"]["start"]["line"], 0})
 	end
+  end)
+
+  vim.keymap.set('i', '<C-z>', function() 
+	  local uuid = string_random(6)
+	  
+	  local row, col = unpack(vim.api.nvim_win_get_cursor(0))
+	  vim.api.nvim_buf_set_text(0, row - 1, col, row - 1, col, { uuid .. " " })
+	  vim.api.nvim_win_set_cursor(0, { row, col + 7 })
   end)
 end
 
@@ -297,6 +466,10 @@ function current_header()
 				header = v["source"] .. " ~ " .. v["header"]
 			else
 				header = v["header"]
+			end
+
+			if v["view"] ~= nil then
+				header = header .. " ~ " .. v["view"]
 			end
 		end
 	end

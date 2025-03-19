@@ -23,3 +23,7 @@ scraper = "0.20.0"
 markup5ever = "0.12.1"
 dyn-fmt = "0.4.3"
 which = "7"
+genanki-rs = "0.4"
+libc = "0.2"
+nix = { version = "0.29", features = ["ioctl"] }
+sixel-rs = "0.4.1"

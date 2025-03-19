@@ -18,6 +18,13 @@ pub(crate) struct Publish {
     pub delete_all: bool,
 }
 
+#[derive(Parser, Debug)]
+pub(crate) struct Ankify {
+    #[arg(short, long)]
+    #[arg(default_value = "output.apkg")]
+    pub out: String,
+}
+
 #[derive(Subcommand, Debug)]
 pub(crate) enum Commands {
     /// Watch files and rebuild
@@ -26,4 +33,6 @@ pub(crate) enum Commands {
     Publish(Publish),
     /// Build all notes from scratch
     Build,
+    /// Generate anki card deck (apkg) from notes
+    Ankify(Ankify),
 }

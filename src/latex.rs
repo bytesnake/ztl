@@ -9,7 +9,7 @@ use scraper::{Html, Selector, Element};
 use regex::Regex;
 use markup5ever::interface::tree_builder::TreeSink;
 
-use crate::notes::{Outgoing, LineColumn, Span, Note};
+use crate::notes::{Outgoing, LineColumn, Span, Note, Card};
 use crate::config::{Config, self};
 
 #[derive(Default, Debug)]
@@ -87,6 +87,8 @@ pub(crate) fn analyze(config: &Config, content: &str, source: &PathBuf) -> Resul
     let mut notes = Vec::new();
 
     static RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"\\r\{(.*?)\}\{(.*?)\}").unwrap());
+    static RE_CLOZE: Lazy<Regex> = Lazy::new(|| Regex::new(r#"\\cloze(?:\[(?P<title>.*?)\])?\{(?P<target_id>.*?)\}\{(?P<content>.*?)\}"#).unwrap());
+    static RE_ASSUMP: Lazy<Regex> = Lazy::new(|| Regex::new(r#"\\requires\{(?P<requirement>.*?)\}\{(?P<expression>.*?)\}"#).unwrap());
 
     for (i, line) in content.lines().map(|x| x.trim()).enumerate() {
         if line.starts_with("\\begin{") && line.contains("label") && line.contains("name") {
@@ -155,25 +157,70 @@ pub(crate) fn analyze(config: &Config, content: &str, source: &PathBuf) -> Resul
                     source: None,
                     start: LineColumn {
                         line: span.start.line + l,
-                        column: Some(x.get(0).unwrap().start()),
+                        column: Some(x.get(0).unwrap().start() + 2),
                     },
                     end: LineColumn {
                         line: span.start.line + l,
-                        column: Some(x.get(0).unwrap().end()),
+                        column: Some(x.get(0).unwrap().end() + 1),
                     },
                 };
 
+                let parts = x.get(1).unwrap().as_str().split("#").collect::<Vec<_>>();
+                let keywords = parts[1..].into_iter()
+                    .map(|x| x.splitn(2, "=").collect::<Vec<_>>())
+                    .map(|x| {
+                        if x.len() == 1 {
+                            return ("anchor".to_string(), x[0].to_string());
+                        } else {
+                            return (x[0].to_string(), x[1].to_string());
+                        }
+                    })
+                    .collect();
+
                 Outgoing {
-                    target: x.get(1).unwrap().as_str().to_string(),
+                    target: parts[0].to_string(),
                     comment: String::new(),
                     label: x.get(2).unwrap().as_str().to_string(),
-                    view: HashMap::new(),
+                    view: keywords,
                     span
                 }
             }).collect::<Vec<_>>()
         ).flatten().collect();
 
         let content = note.content.join("\n");
+
+        let clozes = RE_CLOZE.captures_iter(&content)
+            .map(|caps| {
+                let description = caps.name("title").map_or("", |m| m.as_str()).to_string();
+                let target_id = caps.name("target_id").unwrap().as_str();
+                let _content = caps.name("content").unwrap().as_str();
+
+                Card::Cloze {
+                    description,
+                    target: target_id.to_string(),
+                }
+            });
+
+        let assumptions = RE_ASSUMP.captures_iter(&content)
+            .map(|caps| {
+                let requirement = caps.name("requirement").unwrap().as_str();
+                let expression = caps.name("expression").unwrap().as_str();
+
+                Card::Assumption {
+                    target: requirement.to_string(),
+                }
+            });
+
+        let mut cards = clozes.chain(assumptions)
+            .collect::<Vec<_>>();
+
+        cards.sort_by_key(|x| match x {
+                Card::Cloze { target, ..} => target.clone(),
+                Card::Assumption { target, .. } => target.clone(), });
+
+        cards.dedup_by_key(|x| match x {
+                Card::Cloze { target, .. } => target.clone(),
+                Card::Assumption { target, .. } => target.clone(), });
 
         Ok(Note {
             id: note.label,
@@ -187,6 +234,7 @@ pub(crate) fn analyze(config: &Config, content: &str, source: &PathBuf) -> Resul
             hash: crate::utils::hash(&content),
             html: content,
             public: false,
+            cards,
         })
     }).collect()
 }

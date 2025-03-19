@@ -48,6 +48,8 @@ pub(crate) struct Note {
     pub hash: String,
     #[serde(default)]
     pub public: bool,
+    #[serde(default)]
+    pub cards: Vec<Card>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -55,6 +57,7 @@ pub(crate) struct NodeOutgoing {
     target: Key,
     source: String,
     header: String,
+    view: Option<String>,
     index: usize,
 }
 
@@ -64,6 +67,17 @@ pub(crate) struct Spans {
     header: String,
     kind: Option<String>,
     outgoing: HashMap<String, NodeOutgoing>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub(crate) enum Card {
+    Cloze {
+        description: String,
+        target: String,
+    },
+    Assumption {
+        target: String,
+    },
 }
 
 impl Note {
@@ -82,11 +96,24 @@ impl Note {
             let target_note = notes.notes.get(&s.target)
                 .with_context(|| format!("Could not get reference {} in line {}", &s.target, &s.span.start.line))?;
 
+            let mut view = None;
+            if let Some(anchor) = s.view.get("anchor") {
+                let mut anchor = anchor.replacen(".", " ", 1);
+                if let Some(r) = anchor.get_mut(0..1) {
+                    r.make_ascii_uppercase();
+                }
+                view = Some(anchor);
+            }
+            if let Some(page) = s.view.get("page") {
+                view = Some(format!("p. {}", page));
+            }
+
             let target_node = NodeOutgoing {
                 target: target_note.id.clone(),
                 header: target_note.header.clone(),
                 source: target_note.span.source.clone().unwrap(),
                 index: idx,
+                view,
             };
 
             Ok((key, target_node))
@@ -132,7 +159,7 @@ impl Notes {
             .unwrap().filter_map(|x| x.ok())
             .filter(|x| x.file_name().unwrap().len() != 64)
             .filter(|x| x.extension().is_none())
-            .map(|x| toml::from_str(&std::fs::read_to_string(&x).unwrap()).unwrap())
+            .map(|x| toml::from_str(&std::fs::read_to_string(&x).expect(&format!("Could not open file {}", x.display()))).unwrap())
             .map(|x: Note| (x.id.clone(), x))
             .collect();
 

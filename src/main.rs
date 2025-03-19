@@ -8,6 +8,7 @@ use anyhow::{Result, Context};
 use notify::{Watcher, RecursiveMode,};
 use dyn_fmt::AsStrFormatExt;
 use which::which;
+use regex::Regex;
 
 mod commands;
 mod config;
@@ -16,6 +17,7 @@ mod markdown;
 mod bibtex;
 mod latex;
 mod utils;
+mod anki;
 
 use config::Config;
 
@@ -36,6 +38,7 @@ fn main() -> Result<()> {
         Some(commands::Commands::Build) => build(config),
         Some(commands::Commands::Publish(res)) => publish(config, res),
         Some(commands::Commands::Watch) => watch(config),
+        Some(commands::Commands::Ankify(ankify)) => anki::ankify(config, &ankify.out),
         None => analyze(),
     }
 }
@@ -105,12 +108,13 @@ fn watch(config: config::Config) -> Result<()> {
 
                 let path = utils::diff_paths(event.paths.first().unwrap(), std::env::current_dir().unwrap()).unwrap();
 
-                if path.display().to_string().contains(".ztl") {
+                let path_str = path.display().to_string();
+                if path_str.contains(".ztl") && !path_str.ends_with(".sixel.show") {
                     return;
                 }
 
                 let ext = path.extension().and_then(std::ffi::OsStr::to_str);
-                if ext != Some("md") && ext != Some("bib") && ext != Some("tex") {
+                if ext != Some("md") && ext != Some("bib") && ext != Some("tex") && ext != Some("show") {
                     return;
                 }
                 match event.kind {
@@ -135,21 +139,48 @@ fn watch(config: config::Config) -> Result<()> {
         .with_files("**/*.bib", &c2)?
         .with_files("**/*.tex", &c2)?;
 
-    while let Ok(path) = r.recv() {
-        println!("Update file {} ..", path);
+    loop {
+        let mut queue = vec![];
+        if let Ok(path) = r.recv() {
+            queue.push(path);
+            std::thread::sleep(std::time::Duration::from_millis(100));
 
-        let new_notes = notes.update_files(&path, &config)?;
-
-        for (key, x) in &new_notes {
-            if x.has_changed() {
-                utils::render_html(&c2, &x.html);
+            while let Ok(path) = r.try_recv() {
+                queue.push(path);
             }
         }
 
-        notes.notes.extend(new_notes);
-        notes.update_incoming_links();
+        queue.sort();
+        queue.dedup();
 
-        write_notes(&notes)?;
+        for path in queue {
+            if path.ends_with(".sixel.show") {
+                let key = std::path::Path::new(&path).with_extension("");
+                let key = key.file_stem().unwrap().to_str().unwrap();
+
+                if !Path::new(".ztl/cache").join(key).with_extension("sixel").exists() {
+                    let note = notes.notes.get(key).unwrap();
+                    utils::render_html(&c2, &note.html, &key);
+                }
+
+                utils::show_note(&c2, &key);
+                continue;
+            }
+
+            let new_notes = notes.update_files(&path, &config)?;
+
+            for (key, x) in &new_notes {
+                if x.has_changed() {
+                    utils::render_html(&c2, &x.html, &key);
+                    utils::show_note(&c2, &key);
+                }
+            }
+
+            notes.notes.extend(new_notes);
+            notes.update_incoming_links();
+
+            write_notes(&notes)?;
+        }
     }
 
     Ok(())
@@ -176,7 +207,7 @@ fn publish(config: config::Config, cmds: commands::Publish) -> Result<()> {
                 .output()
                 .expect("failed to execute process");
         }
-        panic!("DELETETE");
+        return Ok(());
     }
 
     let mut queue: Vec<String> = Vec::new();
@@ -194,9 +225,11 @@ fn publish(config: config::Config, cmds: commands::Publish) -> Result<()> {
 
         let note = notes.get(&key).unwrap();
 
+        // skip out of literature notes for now
         if note.html.trim().is_empty() {
             continue;
         }
+
         let html = note.html.replace("\n", " ").replace("xmlns=\"http://www.w3.org/1998/Math/MathML\"", "");
 
         match hash.get(&note.id).clone() {
@@ -210,7 +243,9 @@ fn publish(config: config::Config, cmds: commands::Publish) -> Result<()> {
                     false => "direct",
                 };
 
-                let cmd = format!("{} post --visibility {} \"{}\" --status-id {}", toot_cmd, visibility, &html, &x.1);
+                let html = utils::cleanup_links(&html, &notes, &hash);
+
+                let cmd = format!("{} post --visibility {} '{}' --status-id {}", toot_cmd, visibility, &html, &x.1);
                 println!("Changed {}", note.id);
 
                 let out = std::process::Command::new("sh")
@@ -227,7 +262,7 @@ fn publish(config: config::Config, cmds: commands::Publish) -> Result<()> {
                         if !hash.contains_key(parent) {
                             queue.push(note.id.clone());
                             queue.push(parent.clone());
-                            //println!("NEXT ELEMENT {:?}", queue);
+                            println!("NEXT ELEMENT {:?}", queue);
                             continue;
                         }
 
@@ -236,11 +271,34 @@ fn publish(config: config::Config, cmds: commands::Publish) -> Result<()> {
                     _ => None,
                 };
 
+                // check if all outgoing links are available
+                let mut some_missing = false;
+                for link in &note.outgoing {
+                    let note = notes.get(&link.target).unwrap();
+                    // continue if this is an outgoing reference
+                    if note.target.is_some() {
+                        continue;
+                    }
+
+                    if !hash.contains_key(&link.target) {
+                        if !some_missing {
+                            queue.push(note.id.clone());
+                        }
+                        queue.push(link.target.clone());
+                        some_missing = true;
+                    }
+                }
+                if some_missing {
+                    continue;
+                }
+
+                let html = utils::cleanup_links(&html, &notes, &hash);
+
                 let visibility = match note.public {
                     true => "public",
                     false => "direct",
                 };
-                let mut cmd = format!("{} post --visibility {} \"{}\"", toot_cmd, visibility, &html);
+                let mut cmd = format!("{} post --visibility {} '{}'", toot_cmd, visibility, &html);
 
                 if let Some(parent) = parent {
                     cmd = format!("{} --reply-to {}", cmd, parent);

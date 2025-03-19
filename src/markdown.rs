@@ -180,6 +180,7 @@ pub(crate) fn analyze<'a>(arena: &'a Arena<AstNode<'a>>, content: &str, source: 
             span,
             target: None,
             public: false,
+            cards: Vec::new(),
         }
     }).collect::<Vec<_>>();
 
