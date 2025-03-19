@@ -18,7 +18,7 @@ local default_config = {
 			"Custom Prompt",
 		},
 		callback = function(prompt, cb)
-			local cmd = "curl \"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=AIzaSyCZQV38_Wuj1ZH956IC_1CBzg4islXVfZQ\" -H 'Content-Type: application/json' -X POST -d '{\"contents\": [{\"parts\":[{\"text\": \"" .. prompt .. "\"}] }]}'"
+			local cmd = "curl \"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=\" -H 'Content-Type: application/json' -X POST -d '{\"contents\": [{\"parts\":[{\"text\": \"" .. prompt .. "\"}] }]}'"
 
 			vim.fn.jobstart(cmd, {
 				on_error = function(err)
