@@ -30,7 +30,15 @@ Options:
 
 ## Example with LaTeX
 
-![Peek 2024-10-16 19-43](https://github.com/user-attachments/assets/ba966a55-9b75-40e9-9249-68ac221ebd0b)
+![example](https://github.com/user-attachments/assets/e96b6fdb-7514-40a9-b3a8-01d5dde9c1bf)
+
+## Published to Mastodon
+
+All notes are rendered to HTML5 + MathML, hence can also be published to Mastodon:
+
+<p align="center">
+ <img src="https://github.com/user-attachments/assets/001f9414-1b09-4933-95ad-26dc1d9f7231" width=600 />
+</p>
 
 ### WIP
 
