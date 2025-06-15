@@ -48,6 +48,43 @@ dt {
 dd {
   grid-column-start: 2;
 }
+
+div[class^='columns-']{
+    display: flex;
+    justify-content: space-between;
+}
+
+figcaption {
+    border: 1px black solid;
+    border-width: 1 0 1 0;
+    padding-bottom: 1px;
+}
+
+figcaption .id {
+    font-weight: bold;
+}
+
+.cmbx-10 {
+    font-weight: bold;
+}
+
+.cmti-10 {
+    font-style: italic;
+}
+
+.comment {
+    color: lightseagreen;
+}
+
+figure {
+    margin-left: 0;
+    margin-right: 0;
+}
+
+.small-caps {
+    font-variant: small-caps;
+}
+
 </style></head>
 <body>"#.as_bytes()).unwrap();
 
@@ -55,8 +92,10 @@ dd {
     f.write(b"</body></html>").unwrap();
     f.flush().unwrap();
 
+    let p = std::env::current_dir().unwrap().join(".ztl").join("cache");
+    let p = p.into_os_string().into_string().unwrap();
     let mut out = UnixStream::connect("/tmp/socket_zettel").unwrap();
-    out.write_all(format!("170,{}\n", key).as_bytes()).unwrap();
+    out.write_all(format!("170,{},{}\n", key, p).as_bytes()).unwrap();
     out.flush().unwrap();
     let mut buf = Vec::new();
     let _ = out.read(&mut buf);

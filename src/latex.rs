@@ -39,8 +39,9 @@ pub fn latex_to_html(config: &Config, content: String) -> String {
     f.write(b"\\end{document}").unwrap();
 
     let out_dir = tmp_dir.path().to_str().unwrap();
+    let cfg_dir = std::env::current_dir().unwrap().join(".ztl").join("thmtav.cfg");
     let out = Command::new("make4ht")
-        .args(["-a", "debug", "-c", "/home/losch@alabsad.fau.de/Note/.ztl/thmtav.cfg", "-m", "draft", out_file.to_str().unwrap()])
+        .args(["-a", "debug", "-c", cfg_dir.to_str().unwrap(), "-m", "draft", out_file.to_str().unwrap()])
         .current_dir(out_dir)
         .output().unwrap();
 
