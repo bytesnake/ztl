@@ -1,26 +1,21 @@
-#![allow(unstable)]
-
 use std::path::*;
-use std::process::Command;
 use std::io::{Read, Write};
 use sha2::Digest;
-use scraper::{Html, Selector, Element};
-use std::collections::HashMap;
+use scraper::{Html, Selector};
+use indexmap::IndexMap;
 use regex::Regex;
 use std::os::unix::net::UnixStream;
-use libc::{c_int, c_ulong, c_ushort, STDOUT_FILENO};
-use libc::{ioctl, TIOCGWINSZ, winsize};
+use libc::{TIOCGWINSZ, winsize};
 use nix::ioctl_read_bad;
 use sixel_rs::{
     encoder::Encoder,
-    optflags::{DiffusionMethod, Quality, SizeSpecification, ResampleMethod, ColorOption, ColorSelectionMethod},
-    status::{Error, Status},
+    optflags::{DiffusionMethod, Quality, SizeSpecification, ResampleMethod, ColorSelectionMethod},
 };
 
 use crate::config::Config;
 use crate::notes::Note;
 
-pub(crate) fn render_html(config: &Config, content: &str, key: &str) {
+pub(crate) fn render_html(_config: &Config, content: &str, key: &str) {
     let mut f = std::fs::File::create(".ztl/cache/out.html").unwrap();
     f.write(r#"
 <html>
@@ -103,7 +98,7 @@ figure {
     //let out = Command::new("bash").current_dir(".ztl/cache/").arg("-C").arg(&config.render).arg("out.html").arg(key).spawn().unwrap().wait().unwrap(); 
 }
 
-pub(crate) fn show_note(config: &Config, key: &str) {
+pub(crate) fn show_note(_config: &Config, key: &str) {
     let win_width = get_winwidth();
 
     print!("{esc}c", esc = 27 as char);
@@ -142,7 +137,7 @@ pub(crate) fn hash(content: &str) -> String {
     format!("{:X}", sha256.finalize())
 }
 
-pub(crate) fn cleanup_links(content: &str, notes: &HashMap<std::string::String, Note>, hash: &HashMap<String, (String, String)>) -> String {
+pub(crate) fn cleanup_links(content: &str, notes: &IndexMap<String, Note>, hash: &IndexMap<String, (String, String)>) -> String {
     let mut content = content.to_string();
     let document = Html::parse_document(&content);
     let binding = Selector::parse("a").unwrap();

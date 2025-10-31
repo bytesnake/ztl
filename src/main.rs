@@ -1,14 +1,12 @@
 use std::{io::Write, fs};
-use std::collections::HashMap;
+use indexmap::IndexMap;
 use std::path::Path;
 
 use clap::Parser;
 use sha2::Digest;
 use anyhow::{Result, Context};
 use notify::{Watcher, RecursiveMode,};
-use dyn_fmt::AsStrFormatExt;
 use which::which;
-use regex::Regex;
 
 mod commands;
 mod config;
@@ -39,6 +37,7 @@ fn main() -> Result<()> {
         Some(commands::Commands::Publish(res)) => publish(config, res),
         Some(commands::Commands::Watch) => watch(config),
         Some(commands::Commands::Ankify(ankify)) => anki::ankify(config, &ankify.out),
+        Some(commands::Commands::ListVim) => list_vim(config),
         None => analyze(),
     }
 }
@@ -92,6 +91,18 @@ fn analyze() -> Result<()> {
         .fold((0, 0), |a,b| (a.0 + 1, a.1 + b.outgoing.len()));
 
     println!("Found {} notes with {} outgoing links", nnotes, nlinks);
+
+    Ok(())
+}
+
+fn list_vim(_config: Config) -> Result<()> {
+    let notes = notes::Notes::from_cache();
+
+    println!("[");
+    for note in notes.notes.values() {
+        println!("\t{{ \"key\": \"{}\", \"header\": \"{}\", \"kind\": \"{}\", \"target\": \"{}\" }},", note.id, note.header.replace("\\", "\\\\"), note.kind.as_ref().map(|x| x.as_str()).unwrap_or("note"), format!("{}:{}", note.span.source.as_ref().unwrap_or(&String::new()), note.span.start.line));
+    }
+    println!("{{}}]");
 
     Ok(())
 }
@@ -182,17 +193,15 @@ fn watch(config: config::Config) -> Result<()> {
             write_notes(&notes)?;
         }
     }
-
-    Ok(())
 }
 
 fn publish(config: config::Config, cmds: commands::Publish) -> Result<()> {
     let published_path = config::get_config_path()
         .parent().unwrap().join("published");
 
-    let mut hash: HashMap<String, (String, String)> = fs::read_to_string(&published_path)
+    let mut hash: IndexMap<String, (String, String)> = fs::read_to_string(&published_path)
         .map(|x| toml::from_str(&x).unwrap())
-        .unwrap_or(HashMap::new());
+        .unwrap_or(IndexMap::new());
 
     let toot_cmd = config.toot.unwrap_or_else(|| which("toot").unwrap().display().to_string());
 
@@ -201,7 +210,7 @@ fn publish(config: config::Config, cmds: commands::Publish) -> Result<()> {
             let cmd = format!("{} delete {}", toot_cmd, &k.1);
 
             println!("Deleting {}", &k.1);
-            let out = std::process::Command::new("sh")
+            let _out = std::process::Command::new("sh")
                 .arg("-c")
                 .arg(&cmd)
                 .output()
@@ -211,7 +220,7 @@ fn publish(config: config::Config, cmds: commands::Publish) -> Result<()> {
     }
 
     let mut queue: Vec<String> = Vec::new();
-    let mut notes = notes::Notes::from_cache().notes;
+    let notes = notes::Notes::from_cache().notes;
     let mut it = notes.keys();
 
     loop {
@@ -248,7 +257,7 @@ fn publish(config: config::Config, cmds: commands::Publish) -> Result<()> {
                 let cmd = format!("{} post --visibility {} '{}' --status-id {}", toot_cmd, visibility, &html, &x.1);
                 println!("Changed {}", note.id);
 
-                let out = std::process::Command::new("sh")
+                let _out = std::process::Command::new("sh")
                     .arg("-c")
                     .arg(&cmd)
                     .output()

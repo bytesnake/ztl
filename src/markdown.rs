@@ -1,6 +1,6 @@
 use comrak::nodes::{AstNode, NodeValue, NodeHeading};
 use comrak::{format_html, parse_document, Arena, Options};
-use std::collections::HashMap;
+use indexmap::IndexMap;
 use std::path::PathBuf;
 use anyhow::Result;
 
@@ -53,7 +53,7 @@ pub(crate) fn analyze<'a>(arena: &'a Arena<AstNode<'a>>, content: &str, source: 
             continue;
         };
 
-        let mut pos = LineColumn {
+        let pos = LineColumn {
             line: child.data.borrow().sourcepos.start.line,
             column: None,
         };
@@ -107,7 +107,7 @@ pub(crate) fn analyze<'a>(arena: &'a Arena<AstNode<'a>>, content: &str, source: 
                 let view = parts.into_iter()
                     .map(|x| x.splitn(2, "=").collect::<Vec<_>>())
                     .map(|x| (x[0].to_string(), x[1].to_string()))
-                    .collect::<HashMap<_, _>>();
+                    .collect::<IndexMap<_, _>>();
 
                 let label = match &node.first_child().unwrap().data.borrow().value {
                     NodeValue::Text(text) => text.clone(),
@@ -173,6 +173,7 @@ pub(crate) fn analyze<'a>(arena: &'a Arena<AstNode<'a>>, content: &str, source: 
             header,
             kind: None,
             parent,
+            children: Vec::new(),
             outgoing,
             incoming: Vec::new(),
             hash: crate::utils::hash(&html),

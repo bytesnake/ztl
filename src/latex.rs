@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::Command;
 use std::io::{self, Write};
@@ -23,7 +22,7 @@ struct LatexNote {
     parent: Option<String>,
 }
 
-pub fn latex_to_html(config: &Config, content: String) -> String {
+pub fn latex_to_html(_config: &Config, content: String) -> String {
     let preamble = fs::read_to_string(config::get_config_path().parent().unwrap().join("preamble.tex")).unwrap_or(r#"\usepackage[destlabel=true, backref=false]{{hyperref}}
 \usepackage{{amsmath, amsfonts, amsthm, thmtools, enumitem, mdframed}}
 "#.to_string());
@@ -83,7 +82,7 @@ pub fn latex_to_html(config: &Config, content: String) -> String {
     }
 }
 
-pub(crate) fn analyze(config: &Config, content: &str, source: &PathBuf) -> Result<Vec<Note>> {
+pub(crate) fn analyze(_config: &Config, content: &str, source: &PathBuf) -> Result<Vec<Note>> {
     let mut levels: Vec<LatexNote> = Vec::new();
     let mut notes = Vec::new();
 
@@ -205,7 +204,7 @@ pub(crate) fn analyze(config: &Config, content: &str, source: &PathBuf) -> Resul
         let assumptions = RE_ASSUMP.captures_iter(&content)
             .map(|caps| {
                 let requirement = caps.name("requirement").unwrap().as_str();
-                let expression = caps.name("expression").unwrap().as_str();
+                //let expression = caps.name("expression").unwrap().as_str();
 
                 Card::Assumption {
                     target: requirement.to_string(),
@@ -228,6 +227,7 @@ pub(crate) fn analyze(config: &Config, content: &str, source: &PathBuf) -> Resul
             header: note.title,
             kind: Some(note.env_kind),
             parent: note.parent,
+            children: Vec::new(),
             outgoing,
             incoming: Vec::new(),
             span,

@@ -1,12 +1,12 @@
 use crate::config::{self, Config};
 use std::fs;
-use std::collections::HashMap;
+use indexmap::IndexMap;
 use crate::{notes, utils};
-use anyhow::{Result, Context};
+use anyhow::Result;
 
-use genanki_rs::{Field, Deck, Note, Model, Template, Error};
+use genanki_rs::{Field, Deck, Note, Model, Template};
 
-pub(crate) fn ankify(config: Config, target: &str) -> Result<()> {
+pub(crate) fn ankify(_config: Config, target: &str) -> Result<()> {
     let css = r#"
 .card {
  font-family: arial;
@@ -49,11 +49,11 @@ dd {
     let published_path = config::get_config_path()
         .parent().unwrap().join("published");
 
-    let mut hash: HashMap<String, (String, String)> = fs::read_to_string(&published_path)
+    let hash: IndexMap<String, (String, String)> = fs::read_to_string(&published_path)
         .map(|x| toml::from_str(&x).unwrap())
-        .unwrap_or(HashMap::new());
+        .unwrap_or(IndexMap::new());
 
-    let mut notes = notes::Notes::from_cache().notes;
+    let notes = notes::Notes::from_cache().notes;
 
     let proof_model = Model::new(
         1607392317,

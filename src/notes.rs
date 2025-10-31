@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use indexmap::IndexMap;
 use std::fs;
 
 use serde::{Serialize, Deserialize};
@@ -15,7 +15,7 @@ pub(crate) struct Outgoing {
     pub target: Key,
     pub comment: String,
     pub label: String,
-    pub view: HashMap<String, String>,
+    pub view: IndexMap<String, String>,
     pub span: Span,
 }
 
@@ -40,6 +40,8 @@ pub(crate) struct Note {
     pub header: String,
     pub kind: Option<String>,
     pub parent: Option<Key>,
+    #[serde(default)]
+    pub children: Vec<Key>,
     pub outgoing: Vec<Outgoing>,
     pub incoming: Vec<Key>,
     pub html: String,
@@ -66,7 +68,7 @@ pub(crate) struct Spans {
     target: Key,
     header: String,
     kind: Option<String>,
-    outgoing: HashMap<String, NodeOutgoing>,
+    outgoing: IndexMap<String, NodeOutgoing>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -117,7 +119,7 @@ impl Note {
             };
 
             Ok((key, target_node))
-        }).collect::<Result<HashMap<_, _>>>().map(|spans|
+        }).collect::<Result<IndexMap<_, _>>>().map(|spans|
             Spans {
                 target: self.id.clone(), header: self.header.clone(), kind: self.kind.clone(), outgoing: spans
             })
@@ -147,7 +149,7 @@ impl Note {
 
 #[derive(Debug)]
 pub(crate) struct Notes {
-    pub(crate) notes: HashMap<Key, Note>,
+    pub(crate) notes: IndexMap<Key, Note>,
 }
 
 impl Notes {
@@ -168,7 +170,7 @@ impl Notes {
 
     pub fn empty() -> Self {
         Self {
-            notes: HashMap::new(),
+            notes: IndexMap::new(),
         }
     }
 
@@ -180,7 +182,7 @@ impl Notes {
         Ok(self)
     }
 
-    pub fn update_files(&mut self, pat: &str, config: &Config) -> Result<HashMap<Key, Note>> {
+    pub fn update_files(&mut self, pat: &str, config: &Config) -> Result<IndexMap<Key, Note>> {
         let arena = comrak::Arena::new();
         glob(pat).unwrap()
             .filter_map(|x| x.ok())
@@ -221,11 +223,17 @@ impl Notes {
     }
 
     pub fn update_incoming_links(&mut self) {
-        let mut incoming: HashMap<Key, Vec<Key>> = HashMap::new();
+        let mut incoming: IndexMap<Key, Vec<Key>> = IndexMap::new();
+        let mut children: IndexMap<Key, Vec<Key>> = IndexMap::new();
 
         for note in self.notes.values() {
             for link in &note.outgoing {
                 let elms = incoming.entry(link.target.clone()).or_insert(vec![]);
+                elms.push(note.id.clone());
+            }
+
+            if let Some(par) = &note.parent {
+                let elms = children.entry(par.clone()).or_insert(vec![]);
                 elms.push(note.id.clone());
             }
         }
@@ -234,17 +242,21 @@ impl Notes {
             if incoming.contains_key(&note.id) {
                 note.incoming = incoming.get(&note.id).unwrap().clone();
             }
+
+            if children.contains_key(&note.id) {
+                note.children = children.get(&note.id).unwrap().clone();
+            }
         }
     }
 
-    pub fn spans(&self) -> Result<Vec<(String, HashMap<String, Spans>)>> {
+    pub fn spans(&self) -> Result<Vec<(String, IndexMap<String, Spans>)>> {
         self.notes.values().sorted_by(|a,b| Ord::cmp(&a.span.source, &b.span.source))
             .chunk_by(|n| n.span.source.clone().unwrap())
             .into_iter()
             .map(|(file, notes)| {
                 let notes = notes.into_iter().map(|note|
                     note.outgoing_spans(&self).map(|s| (format!("{}:{}", note.start_line(), note.end_line()), s))
-                ).collect::<Result<HashMap<_, Spans>>>();
+                ).collect::<Result<IndexMap<_, Spans>>>();
 
                 notes.map(|notes| (file, notes))
             })

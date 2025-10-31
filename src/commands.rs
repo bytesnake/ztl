@@ -35,4 +35,6 @@ pub(crate) enum Commands {
     Build,
     /// Generate anki card deck (apkg) from notes
     Ankify(Ankify),
+    /// List all notes into searchable JSON (for neovim's telescope)
+    ListVim,
 }
