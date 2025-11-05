@@ -146,7 +146,7 @@ pub(crate) fn cleanup_links(content: &str, notes: &IndexMap<String, Note>, hash:
     for link in links {
         let href = link.attr("href").unwrap();
         let target = notes.get(href.splitn(2, "#").next().unwrap()).unwrap();
-        let link = match &target.target {
+        let link = match &target.resource {
             Some(x) => x,
             _ => continue,
         };

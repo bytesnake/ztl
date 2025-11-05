@@ -29,6 +29,7 @@ opts.set_preference("layout.css.devPixelsPerPx", ppp)
 #opts.profile = fp
 
 browser = webdriver.Firefox(service=driver_service, options=opts)
+print(browser)
 class Handler(StreamRequestHandler):
     def handle(self):
         while True:
@@ -56,4 +57,5 @@ class ThreadedUnixStreamServer(ThreadingMixIn, UnixStreamServer):
     pass
 
 with ThreadedUnixStreamServer(str(socket), Handler) as server:
+    print(socket)
     server.serve_forever()

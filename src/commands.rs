@@ -37,4 +37,6 @@ pub(crate) enum Commands {
     Ankify(Ankify),
     /// List all notes into searchable JSON (for neovim's telescope)
     ListVim,
+    /// Create a schedule from current active notes
+    Schedule,
 }

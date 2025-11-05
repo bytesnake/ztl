@@ -179,7 +179,7 @@ pub(crate) fn analyze<'a>(arena: &'a Arena<AstNode<'a>>, content: &str, source: 
             hash: crate::utils::hash(&html),
             html,
             span,
-            target: None,
+            resource: None,
             public: false,
             cards: Vec::new(),
         }

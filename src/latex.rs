@@ -231,7 +231,7 @@ pub(crate) fn analyze(_config: &Config, content: &str, source: &PathBuf) -> Resu
             outgoing,
             incoming: Vec::new(),
             span,
-            target: None,
+            resource: None,
             hash: crate::utils::hash(&content),
             html: content,
             public: false,

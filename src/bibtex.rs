@@ -23,14 +23,18 @@ pub(crate) fn analyze(content: &str, source: &PathBuf) -> Result<Vec<Note>> {
             start: LineColumn { line: span.0 + 1, column: None },
             end: LineColumn { line: span.1, column: None },
         };
-        let target = bib.file().ok().map(|x| {
-            if x.ends_with(".md") {
-                x
-            } else {
-                format!("https://zettel.haus/source/{}", x)
-            }
-        }).or_else(|| bib.url().ok()).clone();
-        let header = bib.title().ok().and_then(|x| x.first()).map(|x| x.v.get()).unwrap_or("").to_string();
+
+        // resource field get precedence to file field, get precedence to 
+        // URL field
+        let resource = bib.get_as::<String>("resource")
+            .or(bib.file().map(|x| format!("file:{}", x)))
+            .or(bib.url().map(|x| format!("url:{}", x)))
+            .ok();
+
+        let header = bib.title().ok().
+            and_then(|x| x.first()).map(|x| x.v.get())
+            .unwrap_or("").to_string();
+
         let kind = Some(bib.entry_type.to_string());
 
         Ok(Note {
@@ -42,7 +46,7 @@ pub(crate) fn analyze(content: &str, source: &PathBuf) -> Result<Vec<Note>> {
             incoming: Vec::new(),
             html: String::new(),
             span,
-            target,
+            resource,
             hash: crate::utils::hash(&bib.key),
             public: false,
             cards: Vec::new(),

@@ -46,7 +46,7 @@ pub(crate) struct Note {
     pub incoming: Vec<Key>,
     pub html: String,
     pub span: Span,
-    pub target: Option<String>,
+    pub resource: Option<String>,
     pub hash: String,
     #[serde(default)]
     pub public: bool,
