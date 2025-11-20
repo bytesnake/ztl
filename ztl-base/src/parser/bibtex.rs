@@ -1,7 +1,7 @@
 use std::path::PathBuf;
-use anyhow::Result;
+use line_numbers::LinePositions;
 
-use crate::notes::{LineColumn, Span, Note};
+use crate::{LineColumn, Span, Note, error::ParseReport, error::*};
 
 pub(crate) fn analyze(content: &str, source: &PathBuf) -> Result<Vec<Note>> {
     let mut spans = Vec::new();
@@ -15,11 +15,34 @@ pub(crate) fn analyze(content: &str, source: &PathBuf) -> Result<Vec<Note>> {
         }
     }
 
-    let bib = biblatex::Bibliography::parse(&content).unwrap();
+    let bib = biblatex::Bibliography::parse(&content)
+        .map_err(|err| {
+            // find line of offending bib entry
+            let line_positions = LinePositions::from(content);
+            let (line1, col1) = line_positions.from_offset(err.span.start);
+            let (line2, col2) = line_positions.from_offset(err.span.end);
+
+            let (start, end) = spans.iter().filter(|x| line1.as_usize() <= x.1 && line1.as_usize() >= x.0)
+                .next().unwrap();
+
+            let note = Span {
+                source: Some(source.clone()),
+                start: LineColumn { line: start + 1, column: None },
+                end: LineColumn { line: *end, column: None },
+            };
+
+            let problem = Span {
+                source: Some(source.clone()),
+                start: LineColumn { line: line1.as_usize() + 1, column: Some(col1) },
+                end: LineColumn { line: line2.as_usize() + 1, column: Some(col2) },
+            };
+
+            Error::Parse(ParseReport::new(&note, &problem, &format!("{}", err.kind)))
+        })?;
 
     bib.into_iter().zip(spans.into_iter()).map(|(bib, span)| {
         let span = Span {
-            source: Some(source.to_str().unwrap().to_string()),
+            source: Some(source.clone()),
             start: LineColumn { line: span.0 + 1, column: None },
             end: LineColumn { line: span.1, column: None },
         };

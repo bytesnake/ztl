@@ -1,0 +1,22 @@
+repos:
+  - repo: local
+    hooks:
+      - id: mini.doc
+        name: Generate API documentation
+        always_run: true
+        entry: nvim -u nvim/scripts/minimal_init.lua -l nvim/scripts/make_api_documentation.lua 
+        language: system
+        types: [lua]
+
+  - repo: 'https://github.com/kdheepak/panvimdoc'
+    rev: v4.0.1
+    hooks:
+      - id: panvimdoc
+        files: ^.*\.md$
+        args:
+          - '--project-name'
+          - ztl
+          - '--title-date-pattern'
+          - "%Y %B %d"
+          - '--input-file'
+          - doc/ztl.md

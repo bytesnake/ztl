@@ -2,9 +2,8 @@ use comrak::nodes::{AstNode, NodeValue, NodeHeading};
 use comrak::{format_html, parse_document, Arena, Options};
 use indexmap::IndexMap;
 use std::path::PathBuf;
-use anyhow::Result;
 
-use crate::notes::{Outgoing, LineColumn, Span, Note};
+use crate::{Outgoing, LineColumn, Span, Note, error::*};
 
 pub(crate) fn analyze<'a>(arena: &'a Arena<AstNode<'a>>, content: &str, source: &PathBuf) -> Result<Vec<Note>> {
     let root = parse_document(&arena, content, &Options::default());
@@ -59,7 +58,7 @@ pub(crate) fn analyze<'a>(arena: &'a Arena<AstNode<'a>>, content: &str, source: 
         };
 
         let span = Span {
-            source: Some(source.display().to_string()),
+            source: Some(source.clone()),
             start: pos.clone(),
             end: Default::default(),
         };
@@ -136,26 +135,13 @@ pub(crate) fn analyze<'a>(arena: &'a Arena<AstNode<'a>>, content: &str, source: 
             }
             for child in node.children() {
                 let replace_by = if let NodeValue::Heading(NodeHeading { .. }) = child.data.borrow_mut().value {
-                    let label = match &child.first_child().unwrap().data.borrow().value {
-                        NodeValue::Text(text) => text.clone(),
-                        _ => panic!("No label available"),
-                    };
-
-                    //// check that the first character is ascii and lower-case
-                    if label.starts_with(|x: char| !x.is_ascii() || x.is_ascii_uppercase()) {
-                        continue;
-                    }
-
-                    let parts = label.splitn(2, " ").collect::<Vec<_>>();
-                    let (key, header) = (parts[0].to_string(), parts[1].to_string());
-                    
-                    Some(format!("#{} — {}", key, header))
+                    Some(String::new())
                 } else {
                     None
                 };
 
                 if let Some(text) = replace_by {
-                    child.data.borrow_mut().value = NodeValue::HtmlInline(format!("<h3>{}</h3>", text));
+                    child.data.borrow_mut().value = NodeValue::HtmlInline(text);
 
                     child.first_child().unwrap().detach();
                 }

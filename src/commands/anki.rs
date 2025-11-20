@@ -1,12 +1,11 @@
-use crate::config::{self, Config};
 use std::fs;
 use indexmap::IndexMap;
-use crate::{notes, utils};
-use anyhow::Result;
+use crate::{commands::result::Output};
+use ztl_base::{notes::Notes, Card, config::Config, error::Result, utils};
 
 use genanki_rs::{Field, Deck, Note, Model, Template};
 
-pub(crate) fn ankify(_config: Config, target: &str) -> Result<()> {
+pub(crate) fn ankify(cfg: Config, target: &str) -> Result<Output> {
     let css = r#"
 .card {
  font-family: arial;
@@ -46,14 +45,13 @@ dd {
 }
     "#;
 
-    let published_path = config::get_config_path()
-        .parent().unwrap().join("published");
+    let published_path = cfg.ztl_root().join("published");
 
     let hash: IndexMap<String, (String, String)> = fs::read_to_string(&published_path)
         .map(|x| toml::from_str(&x).unwrap())
         .unwrap_or(IndexMap::new());
 
-    let notes = notes::Notes::from_cache().notes;
+    let notes = Notes::from_cache(&cfg.ztl_root())?.notes;
 
     let proof_model = Model::new(
         1607392317,
@@ -90,23 +88,23 @@ dd {
 
         for card in &note.cards {
             let note = match card {
-                notes::Card::Cloze { target, .. } => {
+                Card::Cloze { target, .. } => {
                     let hash = utils::hash(&format!("{}{}", target, note.id));
                     Note::new(proof_model.clone(), vec![
                         &parent,
                         &note.html,
                         &target,
                         &address,
-                    ])?.guid(hash)
+                    ]).unwrap().guid(hash)
                 },
-                notes::Card::Assumption { target } => {
+                Card::Assumption { target } => {
                     let hash = utils::hash(&format!("{}{}", target, note.id));
                     Note::new(proof_assump_model.clone(), vec![
                         &parent,
                         &note.html,
                         &target,
                         &address,
-                    ])?.guid(hash)
+                    ]).unwrap().guid(hash)
                 },
             };
 
@@ -115,8 +113,8 @@ dd {
         }
     }
 
-    my_deck.write_to_file(target)?;
+    my_deck.write_to_file(target).unwrap();
     println!("Written {} cards to {}", ncards, target);
 
-    Ok(())
+    Ok(Output::Anki)
 }

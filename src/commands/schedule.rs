@@ -1,6 +1,11 @@
 use regex::Regex;
 use jiff::{Span, civil::Date, Zoned, tz::TimeZone, SpanRound, Unit};
 use std::cmp::{Ord, Ordering, PartialOrd};
+use indexmap::{IndexMap, IndexSet};
+//use anyhow::{Result, Context};
+
+use ztl_base::{notes::Notes, error::Result};
+use crate::{Config, commands::result::{Output, ScheduleEntry}};
 
 #[derive(Debug)]
 pub enum State {
@@ -119,8 +124,8 @@ impl Schedule {
                     //let frac = (count as f32 + 1.0) / instances.len() as f32;
                     let span = until.to_duration(&now).unwrap() * (instances.len() + 1) as i32 / count as i32;
 
-                    dbg!(&span);
-                    dbg!(&until.to_duration(&now).unwrap());
+                    //dbg!(&span);
+                    //dbg!(&until.to_duration(&now).unwrap());
 
                     let span = Span::try_from(span).unwrap();
 
@@ -171,4 +176,110 @@ let pairs: Vec<_> = kv_re
         (None, _, None, Some(until), count) => Schedule::Until { until, count },
         _ => panic!(""),
     }
+}
+
+pub(crate) fn schedule(cfg: Config) -> Result<Output> {
+    let notes = Notes::from_cache(&cfg.ztl_root())?;
+    let mut scheds = Vec::new();
+
+    // capture all "<schedule <field>=<value>>" in sources
+    let re = regex::Regex::new(r"<schedule\s*(?:([\s\w=]*))\s+\/>").unwrap();
+    for (note, directive) in notes.notes.values().filter_map(|x| re.captures(&x.html).map(|y| (x, y))) {
+        use jiff::civil::Date;
+        // parse headers into time stamp
+        let re = regex::Regex::new(r"^((?:(\d{4}-\d{2}-\d{2})))").unwrap();
+        let created = re.captures(&note.header);
+
+        // get all instances from children notes
+        let instances = note.children.iter()
+            .filter_map(|x| notes.notes.get(x))
+            .filter_map(|x| re.captures(&x.header))
+            .map(|x| x.get(0).unwrap().as_str().parse().unwrap())
+            .collect::<Vec<Date>>();
+
+        // convert directive into absolute timestamps
+        let created: Option<Date> = created.and_then(|x| x.get(0).map(|x| x.as_str().parse().unwrap()));
+
+        //dbg!(&created, &instances);
+
+        // we support three strategies for directives
+        let directive = directive.get(0).unwrap().as_str();
+        let sched = parse_schedule(directive);
+        let state = sched.to_state(created, instances);
+        scheds.push((note, state));
+    }
+
+    let mut processed = IndexMap::new();
+
+    let names = vec!["micro", "meso", "macro"];
+    let mut current;
+    while scheds.len() != 0 {
+        let keys = scheds.iter().map(|x| x.0.id.clone()).collect::<IndexSet<_>>();
+
+        // split into two sets, those with still active children, and those with none
+        // true if parent exists, and still in process
+        // false if parent not exists or not contained in process
+        (scheds, current) = scheds.into_iter()
+            .partition(|x| x.0.parent.as_ref().map(|x| keys.contains(x)).unwrap_or(false));
+
+        for (note, state) in current {
+            // check if this is a leaf note, then distribute labels
+            let label = if !note.children.iter().any(|x| keys.contains(x)) {
+                let mut parent = note.parent.clone();
+                let mut idx = 1;
+                while let Some(p) = parent {
+                    if !processed.contains_key(&p) {
+                        break;
+                    }
+
+                    let node: &mut (State, String, bool) = processed.get_mut(&p).unwrap();
+                    node.1 = names[idx].to_string();
+
+                    if idx < names.len() {
+                        idx += 1;
+                    }
+
+                    parent = notes.notes.get(&p).unwrap().parent.clone();
+                }
+
+                names[0].to_string()
+            } else {
+                String::new()
+            };
+
+            let pkey = match note.parent.as_ref() {
+                Some(pkey) => pkey,
+                _ => {
+                    processed.insert(note.id.clone(), (state, label, true));
+                    continue;
+                },
+            };
+
+            // if this note has no scheduling parent, we can just add it 
+            if !processed.contains_key(pkey) {
+                processed.insert(note.id.clone(), (state, label, true));
+                continue;
+            }
+
+            // check that the parent state is not over due and valid
+            let state_parent = processed.get(pkey).unwrap();
+            if !matches!(state_parent.0, State::OverDue(_)) && state_parent.2 {
+                processed.insert(note.id.clone(), (state, label, true));
+            } else {
+                processed.insert(note.id.clone(), (state, label, false));
+            }
+        }
+    }
+
+    let mut processed = processed.into_iter().filter(|x| x.1.2).map(|x| (x.0, (x.1.0, x.1.1))).collect::<Vec<_>>();
+    processed.sort_by(|x, y| x.1.0.cmp(&y.1.0));
+
+    let res = processed.into_iter().map(|(id, (state, label))| {
+        let note = notes.notes.get(&id).unwrap();
+
+        ScheduleEntry {
+            key: note.id.clone(), header: note.header.clone(), state: format!("{}", state), label }
+    }).collect::<Vec<_>>();
+
+    Ok(Output::Schedule(res))
 }

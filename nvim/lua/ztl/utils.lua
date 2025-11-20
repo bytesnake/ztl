@@ -4,23 +4,47 @@ local log = require "ztl.log"
 
 local M = {}
 
-local watcher = nil
-function M.call_and_watch(fdir, fnc, jitter)
-  if watcher ~= nil then
-	  fwatch.unwatch(watcher)
+function M.dejitter(fnc, wait)
+  local timer = nil
+  return function(elm)
+	if timer ~= nil then
+	  timer:close()
+	end
+	timer = vim.defer_fn(function()
+	  fnc(elm)
+	  timer = nil
+	end, wait)
+  end
+end
+
+M.watcher = {}
+function M.call_and_watch(path, fnc, jitter)
+  local win_id = vim.api.nvim_get_current_win()
+  if M.watcher[win_id] ~= nil and M.watcher[win_id][1] == path then
+	return
   end
 
-  local path = fnc()
+  fnc()
+
+  if M.watcher[win_id] ~= nil then
+	fwatch.unwatch(M.watcher[win_id][2])
+  end
 
   local defer = nil
-  watcher = fwatch.watch(path, {on_event = function()
-	if not defer then -- only set once in window
-	  defer = vim.defer_fn(function()
-		defer = nil -- clear for next event out side of window
-		fnc() -- do work
-	  end, jitter)  -- run in 100 ms, probably this can be much lower.
+  M.watcher[win_id] = {path, fwatch.watch(path, {
+	on_event = function()
+	  if defer == nil then -- only set once in window
+	    defer = vim.defer_fn(function()
+		  defer = nil -- clear for next event out side of window
+		  fnc() -- do work
+	    end, jitter)  -- run in 100 ms, probably this can be much lower.
+	  end
+	end,
+	on_error = function(error, unwatch)
+	  unwatch()
+	  log.error(error)
 	end
-  end})
+  })}
 end
 
 function M.toml(fname)
@@ -86,23 +110,48 @@ function M.open_buffer()
     end
 end
 
-function M.open(span, target, view)
+function M.unpack_resource(resource)
   local config = require("ztl.config").options
 
   -- split resource string into identifier and resource
-  local identifier, resource = string.match(target,  "^([%a_][%w_]*)%s*:%s*([^\n]*)$")
+  local identifier, resource = string.match(resource,  "^([%a_][%w_]*)%s*:%s*([^\n]*)$")
   if config.resources[identifier] ~= nil then
 	  resource = config.resources[identifier](resource)
   end
 
+  return identifier, resource
+end
+
+function M.format_view(view)
+  if view == nil then
+	return ""
+  end
+
+  if view.anchor ~= nil then
+	return "#anchor=" .. view.anchor
+  elseif view.page ~= nil then
+	return "#page=" .. view.page
+  elseif view.search ~= nil then
+	return "#search=" .. view.search
+  else
+	return ""
+  end
+end
+
+function M.open(ctx, target, view)
+  local config = require("ztl.config").options
+  local identifier, resource = M.unpack_resource(target)
+
   -- if identifier points to note, open it
-  log.info(target)
   if identifier == "key" then
-	local note = M.toml(span:cache_dir() .. resource)
+	local note = M.toml(ctx:notes_dir() .. resource)
 	M.open_file(note["span"]["source"], note["span"]["start"]["line"])
 	return
   end
 
+  view = vim.F.if_nil(view, {})
+
+  local cmd
   if resource:sub(-4) == ".pdf" then
     cmd = config.viewer["pdf"](resource, view)
   elseif string.sub(resource, 1, 4) == "http" then
@@ -116,7 +165,7 @@ function M.open(span, target, view)
   if cmd ~= nil then
 	vim.fn.jobstart(cmd, {
 	  on_error = function(err)
-		vim.notify("Could not run command " .. cmd, "error")
+		vim.notify("Could not run command " .. cmd .. err, "error")
 	  end
 	})
   end

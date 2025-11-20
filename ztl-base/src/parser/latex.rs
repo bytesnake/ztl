@@ -1,15 +1,14 @@
 use std::path::PathBuf;
 use std::process::Command;
-use std::io::{self, Write};
+use std::io::Write;
 use std::fs;
-use anyhow::Result;
 use once_cell::sync::Lazy;
-use scraper::{Html, Selector, Element};
+use scraper::{Html, Selector, Element, HtmlTreeSink};
 use regex::Regex;
 use markup5ever::interface::tree_builder::TreeSink;
 
-use crate::notes::{Outgoing, LineColumn, Span, Note, Card};
-use crate::config::{Config, self};
+use crate::{Outgoing, LineColumn, Span, Note, Card, error::*};
+use crate::config::Config;
 
 #[derive(Default, Debug)]
 struct LatexNote {
@@ -22,10 +21,9 @@ struct LatexNote {
     parent: Option<String>,
 }
 
-pub fn latex_to_html(_config: &Config, content: String) -> String {
-    let preamble = fs::read_to_string(config::get_config_path().parent().unwrap().join("preamble.tex")).unwrap_or(r#"\usepackage[destlabel=true, backref=false]{{hyperref}}
-\usepackage{{amsmath, amsfonts, amsthm, thmtools, enumitem, mdframed}}
-"#.to_string());
+pub fn latex_to_html(config: &Config, note: &Note) -> Result<String> {
+    let preamble = fs::read_to_string(&config.latex_preamble()).unwrap();
+    let preamble_len = preamble.lines().count();
 
     let tmp_dir = tempfile::TempDir::new().unwrap();
 
@@ -34,7 +32,7 @@ pub fn latex_to_html(_config: &Config, content: String) -> String {
 
     f.write(preamble.as_bytes()).unwrap();
     f.write(b"\\begin{document}").unwrap();
-    f.write(content.as_bytes()).unwrap();
+    f.write(note.html.as_bytes()).unwrap();
     f.write(b"\\end{document}").unwrap();
 
     let out_dir = tmp_dir.path().to_str().unwrap();
@@ -45,26 +43,70 @@ pub fn latex_to_html(_config: &Config, content: String) -> String {
         .output().unwrap();
 
     if !out.status.success() {
-        io::stdout().write_all(&out.stdout).unwrap();
-        io::stderr().write_all(&out.stderr).unwrap();
+        let re = Regex::new(r"(?m)^.*l\.(\d+)\s.*$").unwrap();
 
-        String::new()
+        let note_span = note.span.clone();
+        let stdout = String::from_utf8(out.stdout).unwrap();
+        let mut line = None;
+        for cap in re.captures_iter(&stdout) {
+            let full_match = cap.get(0).unwrap().as_str();
+            if full_match.contains("--- TeX4ht warning") {
+                continue;
+            }
+
+            line = Some(cap.get(1).unwrap().as_str().parse::<usize>().unwrap());
+        }
+
+        let problem = if let Some(mut line) = line {
+            if line <= preamble_len {
+                return Err(Error::Parse(ParseReport::new(
+                    &Span {
+                        source: Some(config.latex_preamble()),
+                        start: LineColumn { line: 1, column: Some(1) },
+                        end: LineColumn { line: preamble_len, column: None },
+                    }, 
+                    &Span {
+                        source: Some(config.latex_preamble()),
+                        start: LineColumn { line: line, column: Some(1) },
+                        end: LineColumn { line: line, column: None },
+                    },
+                    "preamble error"
+                )));
+            }
+
+            line = line - preamble_len - 1;
+
+            Span {
+                source: None,
+                start: LineColumn { line: note_span.start.line + line, column: Some(1) },
+                end: LineColumn { line: note_span.start.line + line, column: None }
+            }
+        } else {
+            note_span.clone()
+        };
+
+        //io::stdout().write_all(&out.stdout).unwrap();
+        //io::stderr().write_all(&out.stderr).unwrap();
+
+        Err(Error::Parse(ParseReport::new(&note_span, &problem, "latex problem")))
     } else {
         let cont = std::fs::read_to_string(tmp_dir.path().join("main.html")).unwrap();
 
         let mut document = Html::parse_document(&cont);
+        let modified = HtmlTreeSink::new(document.clone());
 
         // remove all comments from HTML
         let rm = document.root_element().descendants().filter(|x| x.value().is_comment()).map(|x| x.id()).collect::<Vec<_>>();
+
         for id in rm {
-            document.remove_from_parent(&id);
+            modified.remove_from_parent(&id);
         }
 
         // remove empty links which are used as anchors
         let rm = document.select(&Selector::parse("a").unwrap()).filter(|x| x.attr("href").is_none()).map(|x| x.id()).collect::<Vec<_>>();
 
         for id in rm {
-            document.remove_from_parent(&id);
+            modified.remove_from_parent(&id);
         }
 
         // remove middle mrow for overline
@@ -73,12 +115,21 @@ pub fn latex_to_html(_config: &Config, content: String) -> String {
             .map(|x| (x.id(), x.parent_element().unwrap().id())).collect::<Vec<_>>();
 
         for (a,b) in rm {
-            document.reparent_children(&a,&b);
-            document.remove_from_parent(&a);
+            modified.reparent_children(&a,&b);
+            modified.remove_from_parent(&a);
         }
 
+        // remove header
+        let rm = document.select(&Selector::parse(".head").unwrap()).map(|x| x.id()).collect::<Vec<_>>();
+
+        for id in rm {
+            modified.remove_from_parent(&id);
+        }
+
+        // finish modifications and extract body
+        document = modified.finish();
         let body = document.select(&Selector::parse("body div").unwrap()).next().unwrap();
-        body.html()
+        Ok(body.html())
     }
 }
 
@@ -140,7 +191,7 @@ pub(crate) fn analyze(_config: &Config, content: &str, source: &PathBuf) -> Resu
 
     notes.into_iter().map(|note| {
         let span = Span {
-            source: Some(source.display().to_string()),
+            source: Some(source.clone()),
             start: LineColumn {
                 line: note.start,
                 column: None

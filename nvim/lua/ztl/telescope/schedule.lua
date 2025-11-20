@@ -1,22 +1,22 @@
 local pickers = require("telescope.pickers")
 local finders = require("telescope.finders")
-local sorters = require("telescope.sorters")
 local previewers = require("telescope.previewers")
 local entry_display = require('telescope.pickers.entry_display')
-local actions_state = require('telescope.actions.state')
 local actions = require('telescope.actions')
-local putils = require "telescope.previewers.utils"
-local make_entry = require "telescope.make_entry"
-local conf = require("telescope.config").values
 local utils = require("ztl.utils")
-local log = require "ztl.log"
-local Path = require "plenary.path"
 
 local M = {}
 
 function M.schedule(span)
-	local result = vim.system({"ztl", "schedule"}, { text = true }):wait()
+	local result = vim.system({"ztl", "--format", "json", "schedule"}, { text = true }):wait()
 	local arr = vim.json.decode(result.stdout)
+  if arr["Err"] ~= nil then
+	  for k in pairs(arr["Err"]) do
+		  vim.notify(table.concat(arr["Err"][k], "\n"), "error")
+	  end
+
+	  return
+  end
 
 	local opts = {
 	  layout_strategy = "vertical",
@@ -31,11 +31,11 @@ function M.schedule(span)
 	}
 
 	local finder = finders.new_table {
-	  results = arr,
+	  results = arr.Ok.Schedule,
 	  entry_maker = function(entry)
 
-		function make_display(ent)
-		  displayer = entry_display.create {
+		local function make_display(ent)
+		  local displayer = entry_display.create {
 			separator = "",
 			items = {
 			  { width = 6 }, -- label 
@@ -54,21 +54,26 @@ function M.schedule(span)
 			local pattern = "(%a+):(.*)"
 			local state, timestamp = ent.value.state:match(pattern)
 
+			local state_disp
 			if state == "due" then
 			  state_disp = { "Due in " .. timestamp, "GruvboxGreen" }
 			else
 			  state_disp  = { "Overdue " .. timestamp, "GruvboxRed" }
 			end
-		  end
 
-		  return displayer {
-			{ ent.value.label, "notePreviewKind" },
-			state_disp,
-			{ ent.value.header, "notePreviewHeader" },
-		  }
+			return displayer {
+			  { ent.value.label, "notePreviewKind" },
+			  state_disp,
+			  { ent.value.header, "notePreviewHeader" },
+			}
+		  end
 		end
 
-		local note = utils.toml(span:cache_dir() .. entry.key)
+		local note = utils.toml(span:notes_dir() .. entry.key)
+		if note == nil then
+		  return nil
+		end
+
 		return {
 		  value = entry,
 		  display = make_display,
